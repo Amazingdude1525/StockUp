@@ -10,10 +10,10 @@ import {
   Check,
   ChevronRight,
   CircleGauge,
-  Command,
   Crosshair,
   Lightbulb,
-  ListChecks,
+  LogIn,
+  LogOut,
   LoaderCircle,
   Map,
   MapPin,
@@ -23,30 +23,37 @@ import {
   Plus,
   Route,
   Search,
-  Settings,
+  ShieldCheck,
+  Store,
   ShoppingCart,
   Sparkles,
-  Users,
-  Waves,
+  UserRound,
   X,
 } from 'lucide-react';
-import type { AppState, PickTask, Product, Warehouse } from '@/lib/types';
+import type {
+  AppState,
+  PickTask,
+  Product,
+  StaffSession,
+  Warehouse,
+} from '@/lib/types';
 
+type Panel = 'customer' | 'admin' | 'worker';
 type View =
   | 'network'
   | 'warehouse'
   | 'shop'
+  | 'customer-orders'
   | 'orders'
   | 'inventory'
   | 'worker'
   | 'movements'
   | 'intelligence';
-const nav = [
+const adminNav = [
   ['network', 'Network Map', Map],
   ['orders', 'Orders', PackageSearch],
   ['inventory', 'Inventory', Boxes],
   ['warehouse', 'Warehouses', Building2],
-  ['worker', 'Worker Picking', ListChecks],
   ['movements', 'Movements', ArrowLeftRight],
   ['intelligence', 'Intelligence', Sparkles],
 ] as const;
@@ -62,37 +69,71 @@ const statusClass = (s: string) =>
       : 'blue';
 
 export default function StockUpApp() {
-  const [data, setData] = useState<AppState | null>(null),
-    [view, setView] = useState<View>('network'),
-    [warehouse, setWarehouse] = useState('WH02'),
-    [query, setQuery] = useState(''),
-    [cart, setCart] = useState<Record<string, number>>({}),
-    [busy, setBusy] = useState(false),
-    [notice, setNotice] = useState(''),
-    [error, setError] = useState('');
+  const [data, setData] = useState<AppState | null>(null);
+  const [panel, setPanel] = useState<Panel>('admin');
+  const [view, setView] = useState<View>('network');
+  const [warehouse, setWarehouse] = useState('WH02');
+  const [query, setQuery] = useState('');
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [customerName, setCustomerName] = useState('Priya Sharma');
+  const [workerTaskId, setWorkerTaskId] = useState('');
+  const [sessions, setSessions] = useState<
+    Partial<Record<'admin' | 'worker', StaffSession>>
+  >({});
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/stockup');
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      setData(j as AppState);
+      const response = await fetch('/api/stockup');
+      const json: any = await response.json();
+      if (!response.ok) throw new Error(json.error);
+      setData(json as AppState);
       setError('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to load StockUp data.');
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : 'Unable to load StockUp data.',
+      );
     }
   }, []);
+
   useEffect(() => {
     void load();
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
+    const saved = localStorage.getItem('stockup-staff-sessions');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as Partial<
+          Record<'admin' | 'worker', StaffSession>
+        >;
+        const active = Object.fromEntries(
+          Object.entries(parsed).filter(
+            ([, session]) =>
+              new Date((session as StaffSession).expiresAt) > new Date(),
+          ),
+        );
+        setSessions(active);
+      } catch {
+        localStorage.removeItem('stockup-staff-sessions');
+      }
+    }
+    const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
         searchRef.current?.focus();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [load]);
+
+  useEffect(() => {
+    localStorage.setItem('stockup-staff-sessions', JSON.stringify(sessions));
+  }, [sessions]);
+
   useEffect(() => {
     const context = (
       document as Document & {
@@ -102,7 +143,7 @@ export default function StockUpApp() {
       }
     ).modelContext;
     if (!context?.registerTool) return;
-    const ac = new AbortController();
+    const controller = new AbortController();
     void Promise.resolve(
       context.registerTool(
         {
@@ -118,36 +159,79 @@ export default function StockUpApp() {
           },
           annotations: { readOnlyHint: true, untrustedContentHint: false },
           execute: (input: unknown) => {
-            const q = String((input as { query: string }).query || '');
-            setQuery(q);
+            setQuery(String((input as { query: string }).query || ''));
+            setPanel('admin');
             setView('inventory');
-            return { query: q, visibleView: 'inventory' };
+            return { visiblePanel: 'admin', visibleView: 'inventory' };
           },
         },
-        { signal: ac.signal },
+        { signal: controller.signal },
       ),
     ).catch(() => {});
-    return () => ac.abort();
+    return () => controller.abort();
   }, []);
-  const act = async (payload: unknown) => {
+
+  const act = async (
+    payload: Record<string, unknown>,
+    sessionToken?: string,
+  ) => {
     setBusy(true);
     setError('');
     try {
-      const r = await fetch('/api/stockup', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
+      const response = await fetch('/api/stockup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          ...(sessionToken ? { sessionToken } : {}),
         }),
-        j: any = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      setData(j.state as AppState);
-      return j.result;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Operation failed.');
-      throw e;
+      });
+      const json: any = await response.json();
+      if (!response.ok) throw new Error(json.error);
+      setData(json.state as AppState);
+      return json.result;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Operation failed.');
+      throw reason;
     } finally {
       setBusy(false);
     }
+  };
+
+  const enterPanel = (next: Panel) => {
+    setPanel(next);
+    setError('');
+    setNotice('');
+    setView(
+      next === 'admin' ? 'network' : next === 'customer' ? 'shop' : 'worker',
+    );
+  };
+  const signIn = async (
+    kind: 'admin' | 'worker',
+    credentials: StaffCredentials,
+  ) => {
+    try {
+      const session = (await act({
+        action: 'staffLogin',
+        ...credentials,
+      })) as StaffSession;
+      if (kind === 'admin' && session.role !== 'NETWORK_ADMIN')
+        throw new Error('Network Admin access is required for this panel.');
+      if (kind === 'worker' && session.role === 'NETWORK_ADMIN')
+        throw new Error('Warehouse staff access is required for this panel.');
+      setSessions((current) => ({ ...current, [kind]: session }));
+      setNotice(`Signed in as ${session.displayName} · ${session.staffCode}`);
+    } catch {}
+  };
+  const signOut = async (kind: 'admin' | 'worker') => {
+    const session = sessions[kind];
+    setSessions((current) => {
+      const next = { ...current };
+      delete next[kind];
+      return next;
+    });
+    if (session)
+      void act({ action: 'staffLogout' }, session.token).catch(() => {});
   };
   const openWarehouse = (code: string) => {
     setWarehouse(code);
@@ -155,37 +239,78 @@ export default function StockUpApp() {
   };
   const searchResults = useMemo(() => {
     if (!data || !query.trim()) return [];
-    const q = query.toLowerCase();
-    return data.products.filter((p) =>
+    const normalized = query.toLowerCase();
+    return data.products.filter((product) =>
       [
-        p.name,
-        p.sku,
-        p.barcode,
-        ...p.locations.map((l) => l.locationCode),
-      ].some((v) => v.toLowerCase().includes(q)),
+        product.name,
+        product.sku,
+        product.barcode,
+        ...product.locations.map((location) => location.locationCode),
+      ].some((value) => value.toLowerCase().includes(normalized)),
     );
   }, [data, query]);
+
   if (!data) return <Loading error={error} retry={load} />;
-  const selectedWh =
-    data.warehouses.find((w) => w.code === warehouse) ?? data.warehouses[0];
+  const selectedWarehouse =
+    data.warehouses.find((item) => item.code === warehouse) ??
+    data.warehouses[0];
+  const adminSession = sessions.admin;
+  const workerSession = sessions.worker;
+  const workerTasks = data.tasks.filter(
+    (task) =>
+      !workerSession?.warehouseCode ||
+      task.items.some((item) =>
+        item.locationCode.startsWith(workerSession.warehouseCode!),
+      ),
+  );
+  const workerTask =
+    workerTasks.find((task) => task.id === workerTaskId) ?? workerTasks[0];
+  const visibleProducts = query.trim() ? searchResults : data.products;
+  const adminReady =
+    panel !== 'admin' || adminSession?.role === 'NETWORK_ADMIN';
+  const workerReady =
+    panel !== 'worker' ||
+    (workerSession && workerSession.role !== 'NETWORK_ADMIN');
+
   return (
     <main className="min-h-screen bg-[#f4f7fa] text-[#14213d]">
-      <Sidebar view={view} onView={setView} />
-      <section className="lg:pl-[232px]">
+      {panel === 'admin' && adminReady && (
+        <Sidebar
+          view={view}
+          onView={setView}
+          session={adminSession!}
+          onLogout={() => void signOut('admin')}
+        />
+      )}
+      <section
+        className={panel === 'admin' && adminReady ? 'lg:pl-[232px]' : ''}
+      >
         <Topbar
+          panel={panel}
+          view={view}
+          onPanel={enterPanel}
+          onView={setView}
           searchRef={searchRef}
           query={query}
           setQuery={setQuery}
-          onSearch={() => setView('inventory')}
-          cartCount={Object.values(cart).reduce((a, b) => a + b, 0)}
-          openCart={() => setView('shop')}
+          onSearch={() => setView(panel === 'customer' ? 'shop' : 'inventory')}
+          cartCount={Object.values(cart).reduce(
+            (sum, quantity) => sum + quantity,
+            0,
+          )}
+          openCart={() => {
+            setPanel('customer');
+            setView('shop');
+          }}
           onAlerts={() => setView('intelligence')}
           onSimulation={async () => {
             try {
-              const result = await act({ action: 'simulateSurge' });
+              const result = await act(
+                { action: 'simulateSurge' },
+                adminSession?.token,
+              );
               setNotice(
-                result.created +
-                  ' simulated orders were reserved, allocated, and routed.',
+                `${result.created} simulated orders were reserved, allocated, and routed.`,
               );
               setView('orders');
             } catch {}
@@ -195,7 +320,7 @@ export default function StockUpApp() {
           {notice && (
             <div className="mb-5 flex items-start justify-between rounded-xl border border-[#bde6cb] bg-[#ecfbf2] px-4 py-3 text-sm font-semibold text-[#176b3a]">
               <span>{notice}</span>
-              <button onClick={() => setNotice('')}>
+              <button aria-label="Dismiss notice" onClick={() => setNotice('')}>
                 <X size={16} />
               </button>
             </div>
@@ -206,139 +331,193 @@ export default function StockUpApp() {
               {error}
             </div>
           )}
-          {view === 'network' && (
-            <NetworkView data={data} openWarehouse={openWarehouse} />
+
+          {panel === 'admin' && !adminReady && (
+            <StaffLogin
+              kind="admin"
+              busy={busy}
+              onLogin={(credentials) => void signIn('admin', credentials)}
+            />
           )}
-          {view === 'warehouse' && (
-            <WarehouseView
-              warehouse={selectedWh}
-              products={data.products}
-              task={data.tasks.find((t) =>
-                t.items.some((i) => i.locationCode.startsWith(selectedWh.code)),
+          {panel === 'worker' && !workerReady && (
+            <StaffLogin
+              kind="worker"
+              busy={busy}
+              onLogin={(credentials) => void signIn('worker', credentials)}
+            />
+          )}
+
+          {panel === 'admin' && adminReady && (
+            <>
+              {view === 'network' && (
+                <NetworkView data={data} openWarehouse={openWarehouse} />
               )}
-              onChange={openWarehouse}
-              onInventory={() => {
-                setQuery(selectedWh.code);
-                setView('inventory');
-              }}
-              onPicks={() => setView('worker')}
-            />
-          )}
-          {view === 'shop' && (
-            <ShopView
-              products={data.products}
-              cart={cart}
-              setCart={setCart}
-              busy={busy}
-              checkout={async () => {
-                const items = Object.entries(cart)
-                  .filter(([, q]) => q > 0)
-                  .map(([productId, quantity]) => ({ productId, quantity }));
-                try {
-                  const result = await act({
-                    action: 'createOrder',
-                    items,
-                    customerName: 'Priya Sharma',
-                  });
-                  setCart({});
-                  setNotice(
-                    `${result.orderCode} created and allocated to ${result.warehouseCode}. ${result.reason}`,
-                  );
-                  setView('orders');
-                } catch {}
-              }}
-            />
-          )}
-          {view === 'orders' && (
-            <OrdersView
-              data={data}
-              onOpen={(code) => {
-                setWarehouse(code);
-                setView('warehouse');
-              }}
-            />
-          )}
-          {view === 'inventory' && (
-            <InventoryView
-              products={query ? searchResults : data.products}
-              query={query}
-              onMap={(code) => openWarehouse(code)}
-            />
-          )}
-          {view === 'worker' && (
-            <WorkerView
-              task={data.tasks[0]}
-              busy={busy}
-              onStart={async (taskId) => {
-                try {
-                  await act({ action: 'startTask', taskId });
-                  setNotice(
-                    'Picking started. The first graph-routed stop is active.',
-                  );
-                } catch {}
-              }}
-              onConfirm={async (itemId, barcode) => {
-                try {
-                  await act({ action: 'confirmPick', itemId, barcode });
-                  setNotice(
-                    'Pick verified. Inventory and movement ledger updated.',
-                  );
-                } catch {}
-              }}
-              onMissing={async (itemId) => {
-                try {
-                  const result = await act({ action: 'reportMissing', itemId });
-                  setNotice(
-                    result.rerouted
-                      ? 'Inventory exception recorded. ' +
-                          result.resolution +
-                          '. Route recalculated.'
-                      : 'Inventory exception recorded. ' +
-                          result.resolution +
-                          '.',
-                  );
-                } catch {}
-              }}
-            />
-          )}
-          {view === 'movements' && <MovementsView data={data} />}
-          {view === 'intelligence' && (
-            <IntelligenceView
-              data={data}
-              busy={busy}
-              onSimulation={async () => {
-                try {
-                  const result = await act({ action: 'simulateSurge' });
-                  setNotice(
-                    result.created +
-                      ' simulated orders created with real reservations and pick tasks.',
-                  );
-                } catch {}
-              }}
-              onTransfer={async (
-                sourceInventoryId,
-                destinationLocationCode,
-                quantity,
-              ) => {
-                try {
-                  const result = await act({
-                    action: 'transferInventory',
+              {view === 'warehouse' && (
+                <WarehouseView
+                  warehouse={selectedWarehouse}
+                  products={data.products}
+                  task={data.tasks.find((task) =>
+                    task.items.some((item) =>
+                      item.locationCode.startsWith(selectedWarehouse.code),
+                    ),
+                  )}
+                  onChange={openWarehouse}
+                  onInventory={() => {
+                    setQuery(selectedWarehouse.code);
+                    setView('inventory');
+                  }}
+                  onPicks={() => enterPanel('worker')}
+                />
+              )}
+              {view === 'orders' && (
+                <OrdersView data={data} onOpen={openWarehouse} />
+              )}
+              {view === 'inventory' && (
+                <InventoryView
+                  products={visibleProducts}
+                  query={query}
+                  onMap={openWarehouse}
+                />
+              )}
+              {view === 'movements' && <MovementsView data={data} />}
+              {view === 'intelligence' && (
+                <IntelligenceView
+                  data={data}
+                  busy={busy}
+                  onSimulation={async () => {
+                    try {
+                      const result = await act(
+                        { action: 'simulateSurge' },
+                        adminSession!.token,
+                      );
+                      setNotice(
+                        `${result.created} simulated orders created with real reservations and pick tasks.`,
+                      );
+                    } catch {}
+                  }}
+                  onTransfer={async (
                     sourceInventoryId,
                     destinationLocationCode,
                     quantity,
-                  });
-                  setNotice(
-                    result.referenceId +
-                      ': ' +
-                      quantity +
-                      ' units transferred to ' +
-                      destinationLocationCode +
-                      '; movement ledger updated.',
-                  );
-                  setView('movements');
-                } catch {}
-              }}
-            />
+                  ) => {
+                    try {
+                      const result = await act(
+                        {
+                          action: 'transferInventory',
+                          sourceInventoryId,
+                          destinationLocationCode,
+                          quantity,
+                        },
+                        adminSession!.token,
+                      );
+                      setNotice(
+                        `${result.referenceId}: ${quantity} units transferred to ${destinationLocationCode}; movement ledger updated.`,
+                      );
+                      setView('movements');
+                    } catch {}
+                  }}
+                />
+              )}
+            </>
+          )}
+
+          {panel === 'customer' && (
+            <>
+              {view === 'shop' && (
+                <ShopView
+                  products={visibleProducts}
+                  cart={cart}
+                  setCart={setCart}
+                  busy={busy}
+                  customerName={customerName}
+                  setCustomerName={setCustomerName}
+                  onOrders={() => setView('customer-orders')}
+                  checkout={async () => {
+                    const items = Object.entries(cart)
+                      .filter(([, quantity]) => quantity > 0)
+                      .map(([productId, quantity]) => ({
+                        productId,
+                        quantity,
+                      }));
+                    try {
+                      const result = await act({
+                        action: 'createOrder',
+                        items,
+                        customerName,
+                      });
+                      setCart({});
+                      setNotice(
+                        `${result.orderCode} placed. ${result.warehouseCode} is preparing your order.`,
+                      );
+                      setView('customer-orders');
+                    } catch {}
+                  }}
+                />
+              )}
+              {view === 'customer-orders' && (
+                <CustomerOrdersView
+                  orders={data.orders.filter(
+                    (order) =>
+                      order.customerName.toLowerCase() ===
+                      customerName.trim().toLowerCase(),
+                  )}
+                  customerName={customerName}
+                  onShop={() => setView('shop')}
+                />
+              )}
+            </>
+          )}
+
+          {panel === 'worker' && workerReady && (
+            <>
+              <WorkerTaskQueue
+                tasks={workerTasks}
+                selectedId={workerTask?.id ?? ''}
+                session={workerSession!}
+                onSelect={setWorkerTaskId}
+                onLogout={() => void signOut('worker')}
+              />
+              <WorkerView
+                task={workerTask}
+                busy={busy}
+                employeeCode={workerSession!.staffCode}
+                onStart={async (taskId) => {
+                  try {
+                    await act(
+                      { action: 'startTask', taskId },
+                      workerSession!.token,
+                    );
+                    setNotice(
+                      'Picking started. The first graph-routed stop is active.',
+                    );
+                  } catch {}
+                }}
+                onConfirm={async (itemId, barcode) => {
+                  try {
+                    await act(
+                      { action: 'confirmPick', itemId, barcode },
+                      workerSession!.token,
+                    );
+                    setNotice(
+                      'Pick verified. Inventory and movement ledger updated.',
+                    );
+                  } catch {}
+                }}
+                onMissing={async (itemId) => {
+                  try {
+                    const result = await act(
+                      { action: 'reportMissing', itemId },
+                      workerSession!.token,
+                    );
+                    setNotice(
+                      result.rerouted
+                        ? `Inventory exception recorded. ${result.resolution}. Route recalculated.`
+                        : `Inventory exception recorded. ${result.resolution}.`,
+                    );
+                  } catch {}
+                }}
+              />
+            </>
           )}
         </div>
       </section>
@@ -379,7 +558,121 @@ function Loading({ error, retry }: { error: string; retry: () => void }) {
     </main>
   );
 }
-function Sidebar({ view, onView }: { view: View; onView: (v: View) => void }) {
+type StaffCredentials = {
+  warehouseCode: string;
+  warehousePasscode: string;
+  employeeCode: string;
+  pin: string;
+};
+
+function StaffLogin({
+  kind,
+  busy,
+  onLogin,
+}: {
+  kind: 'admin' | 'worker';
+  busy: boolean;
+  onLogin: (credentials: StaffCredentials) => void;
+}) {
+  const defaults =
+    kind === 'admin'
+      ? {
+          warehouseCode: 'NETWORK',
+          warehousePasscode: 'STOCKADMIN',
+          employeeCode: 'ADMIN100',
+          pin: '2026',
+        }
+      : {
+          warehouseCode: 'WH02',
+          warehousePasscode: 'STOCK02',
+          employeeCode: 'EMP1042',
+          pin: '1234',
+        };
+  const [credentials, setCredentials] = useState<StaffCredentials>(defaults);
+  return (
+    <div className="mx-auto grid min-h-[68vh] max-w-5xl place-items-center">
+      <div className="grid w-full overflow-hidden rounded-3xl border bg-white shadow-xl lg:grid-cols-[1fr_1.1fr]">
+        <div className="bg-[#12213f] p-8 text-white md:p-10">
+          <div className="grid size-12 place-items-center rounded-2xl bg-white/10">
+            <ShieldCheck />
+          </div>
+          <p className="mt-8 text-xs font-black uppercase tracking-[.16em] text-[#9fb1cb]">
+            Verified operational access
+          </p>
+          <h1 className="mt-2 text-3xl font-black tracking-[-.04em]">
+            {kind === 'admin' ? 'Network Admin' : 'Warehouse Employee'}
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-[#bdc9da]">
+            {kind === 'admin'
+              ? 'Control allocation, inventory, movement auditing, transfers, and network intelligence.'
+              : 'Open assigned pick work, follow the route, verify barcodes, and report bin exceptions.'}
+          </p>
+          <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-[#dce5f2]">
+            <p className="font-black text-[#a8ee80]">Demo credentials loaded</p>
+            <p className="mt-1">
+              They are validated against PBKDF2 hashes stored server-side and
+              create an expiring staff session.
+            </p>
+          </div>
+        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onLogin(credentials);
+          }}
+          className="p-8 md:p-10"
+        >
+          <h2 className="text-2xl font-black">Sign in to continue</h2>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            {[
+              ['Warehouse code', 'warehouseCode'],
+              ['Warehouse passcode', 'warehousePasscode'],
+              ['Employee code', 'employeeCode'],
+              ['Employee PIN', 'pin'],
+            ].map(([label, key]) => (
+              <label key={key} className="text-sm font-bold text-[#536174]">
+                {label}
+                <input
+                  required
+                  type={
+                    key.includes('pass') || key === 'pin' ? 'password' : 'text'
+                  }
+                  value={credentials[key as keyof StaffCredentials]}
+                  onChange={(event) =>
+                    setCredentials((current) => ({
+                      ...current,
+                      [key]: event.target.value,
+                    }))
+                  }
+                  className="mt-2 h-12 w-full rounded-xl border bg-[#f8fafc] px-4 text-[#14213d] outline-none focus:border-[#1262e3]"
+                />
+              </label>
+            ))}
+          </div>
+          <button
+            disabled={busy}
+            className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#1262e3] font-black text-white disabled:opacity-40"
+          >
+            <LogIn size={18} />
+            Verify & open panel
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({
+  view,
+  onView,
+  session,
+  onLogout,
+}: {
+  view: View;
+  onView: (view: View) => void;
+  session: StaffSession;
+  onLogout: () => void;
+}) {
   return (
     <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] border-r border-[#dfe5ec] bg-white lg:flex lg:flex-col">
       <div className="flex h-[74px] items-center gap-3 border-b border-[#e8edf2] px-6">
@@ -389,15 +682,15 @@ function Sidebar({ view, onView }: { view: View; onView: (v: View) => void }) {
         <div>
           <p className="text-[17px] font-black tracking-[-.03em]">STOCKUP</p>
           <p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#7c8799]">
-            Command Center
+            Network Control
           </p>
         </div>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-5">
         <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#98a2b2]">
-          Operations
+          Admin operations
         </p>
-        {nav.map(([key, label, Icon]) => (
+        {adminNav.map(([key, label, Icon]) => (
           <button
             key={key}
             onClick={() => onView(key)}
@@ -409,24 +702,36 @@ function Sidebar({ view, onView }: { view: View; onView: (v: View) => void }) {
         ))}
       </nav>
       <div className="border-t border-[#e8edf2] p-3">
-        <div className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-[#8a96a7]">
-          <Settings size={18} />
-          Allocation weights · managed
-        </div>
-        <div className="mt-2 flex items-center gap-3 rounded-xl bg-[#f6f8fa] p-3">
+        <div className="flex items-center gap-3 rounded-xl bg-[#f6f8fa] p-3">
           <div className="grid size-9 place-items-center rounded-full bg-[#12213f] text-xs font-bold text-white">
-            AK
+            {session.displayName
+              .split(' ')
+              .map((part) => part[0])
+              .join('')
+              .slice(0, 2)}
           </div>
-          <div>
-            <p className="text-sm font-bold">Arjun Kapoor</p>
-            <p className="text-xs text-[#7c8799]">Network Admin</p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold">{session.displayName}</p>
+            <p className="text-xs text-[#7c8799]">{session.staffCode}</p>
           </div>
+          <button
+            aria-label="Sign out"
+            onClick={onLogout}
+            className="text-[#7c8799]"
+          >
+            <LogOut size={17} />
+          </button>
         </div>
       </div>
     </aside>
   );
 }
+
 function Topbar({
+  panel,
+  view,
+  onPanel,
+  onView,
   searchRef,
   query,
   setQuery,
@@ -436,9 +741,13 @@ function Topbar({
   onAlerts,
   onSimulation,
 }: {
+  panel: Panel;
+  view: View;
+  onPanel: (panel: Panel) => void;
+  onView: (view: View) => void;
   searchRef: React.RefObject<HTMLInputElement | null>;
   query: string;
-  setQuery: (q: string) => void;
+  setQuery: (query: string) => void;
   onSearch: () => void;
   cartCount: number;
   openCart: () => void;
@@ -446,56 +755,103 @@ function Topbar({
   onSimulation: () => void;
 }) {
   return (
-    <header className="sticky top-0 z-10 flex h-[74px] items-center gap-3 border-b border-[#dfe5ec] bg-white/95 px-4 backdrop-blur md:px-8">
-      <div className="grid size-9 place-items-center rounded-xl bg-[#12213f] text-white lg:hidden">
-        <Boxes size={18} />
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSearch();
-        }}
-        className="relative max-w-[540px] flex-1"
-      >
-        <Search
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#718096]"
-          size={17}
-        />
-        <input
-          ref={searchRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search product, SKU, barcode or location"
-          className="h-10 w-full rounded-lg border border-[#dce2e9] bg-[#f8fafc] pl-10 pr-16 text-sm outline-none focus:border-[#1262e3] focus:ring-2 focus:ring-[#1262e3]/10"
-        />
-        <span className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded border bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#7c8799]">
-          <Command size={10} />K
-        </span>
-      </form>
-      <button
-        aria-label="Open operational alerts"
-        onClick={onAlerts}
-        className="ml-auto grid size-10 place-items-center rounded-lg border bg-white text-[#556274]"
-      >
-        <Bell size={17} />
-      </button>
-      <button
-        onClick={onSimulation}
-        className="hidden h-10 items-center gap-2 rounded-lg border border-[#cfe0f5] bg-[#edf5ff] px-3 text-xs font-black text-[#1262e3] md:flex"
-      >
-        <CircleGauge size={16} /> Simulate surge
-      </button>
-      <button
-        onClick={openCart}
-        className="relative grid size-10 place-items-center rounded-lg bg-[#12213f] text-white"
-      >
-        <ShoppingCart size={17} />
-        {cartCount > 0 && (
-          <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-[#7ed957] text-[10px] font-black text-[#12213f]">
-            {cartCount}
-          </span>
+    <header className="sticky top-0 z-10 border-b border-[#dfe5ec] bg-white/95 backdrop-blur">
+      <div className="flex min-h-[74px] items-center gap-3 px-4 md:px-8">
+        <div className="flex items-center gap-2 lg:hidden">
+          <div className="grid size-9 place-items-center rounded-xl bg-[#12213f] text-white">
+            <Boxes size={18} />
+          </div>
+          <b>STOCKUP</b>
+        </div>
+        <div className="order-3 flex w-full items-center rounded-xl bg-[#f1f4f7] p-1 md:order-none md:w-auto">
+          {(
+            [
+              ['customer', 'Customer', Store],
+              ['admin', 'Admin', ShieldCheck],
+              ['worker', 'Worker', UserRound],
+            ] as const
+          ).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => onPanel(key)}
+              className={`flex h-9 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-black transition md:flex-none ${panel === key ? 'bg-white text-[#1262e3] shadow-sm' : 'text-[#69768a]'}`}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+        {panel !== 'worker' && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSearch();
+            }}
+            className="relative ml-auto hidden max-w-[480px] flex-1 sm:block"
+          >
+            <Search
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#718096]"
+              size={17}
+            />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={
+                panel === 'customer'
+                  ? 'Search products'
+                  : 'Search product, SKU, barcode or location'
+              }
+              className="h-10 w-full rounded-lg border border-[#dce2e9] bg-[#f8fafc] pl-10 pr-14 text-sm outline-none focus:border-[#1262e3]"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#7c8799]">
+              ⌘K
+            </span>
+          </form>
         )}
-      </button>
+        {panel === 'customer' && (
+          <div className="ml-auto flex gap-2 sm:ml-0">
+            <button
+              onClick={() =>
+                onView(view === 'customer-orders' ? 'shop' : 'customer-orders')
+              }
+              className="h-10 rounded-lg border px-3 text-xs font-black"
+            >
+              {view === 'customer-orders' ? 'Shop' : 'My orders'}
+            </button>
+            <button
+              aria-label="Open basket"
+              onClick={openCart}
+              className="relative grid size-10 place-items-center rounded-lg bg-[#12213f] text-white"
+            >
+              <ShoppingCart size={17} />
+              {cartCount > 0 && (
+                <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-[#7ed957] text-[10px] font-black text-[#12213f]">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
+        {panel === 'admin' && (
+          <div className="ml-auto flex gap-2 sm:ml-0">
+            <button
+              aria-label="Open operational alerts"
+              onClick={onAlerts}
+              className="grid size-10 place-items-center rounded-lg border bg-white text-[#556274]"
+            >
+              <Bell size={17} />
+            </button>
+            <button
+              onClick={onSimulation}
+              className="hidden h-10 items-center gap-2 rounded-lg border border-[#cfe0f5] bg-[#edf5ff] px-3 text-xs font-black text-[#1262e3] xl:flex"
+            >
+              <CircleGauge size={16} />
+              Simulate surge
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 }
@@ -1012,12 +1368,18 @@ function ShopView({
   cart,
   setCart,
   busy,
+  customerName,
+  setCustomerName,
+  onOrders,
   checkout,
 }: {
   products: Product[];
   cart: Record<string, number>;
   setCart: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   busy: boolean;
+  customerName: string;
+  setCustomerName: (name: string) => void;
+  onOrders: () => void;
   checkout: () => void;
 }) {
   const items = products.filter((p) => cart[p.id] > 0),
@@ -1028,6 +1390,14 @@ function ShopView({
         eyebrow="Customer panel"
         title="Shop from live inventory"
         sub="Every checkout creates a reserved warehouse order and pick task."
+        action={
+          <button
+            onClick={onOrders}
+            className="rounded-lg border bg-white px-4 py-2 text-sm font-black text-[#1262e3]"
+          >
+            Track my orders
+          </button>
+        }
       />
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
@@ -1078,6 +1448,14 @@ function ShopView({
           ))}
         </div>
         <aside className="h-fit rounded-2xl border bg-white p-5 shadow-sm xl:sticky xl:top-24">
+          <label className="mb-5 block text-xs font-bold uppercase text-[#788598]">
+            Customer name
+            <input
+              value={customerName}
+              onChange={(event) => setCustomerName(event.target.value)}
+              className="mt-2 h-11 w-full rounded-xl border px-3 text-sm font-semibold normal-case outline-none focus:border-[#1262e3]"
+            />
+          </label>
           <div className="flex items-center gap-2">
             <ShoppingCart size={19} />
             <h2 className="text-lg font-black">Order basket</h2>
@@ -1262,15 +1640,155 @@ function InventoryView({
   );
 }
 
+function CustomerOrdersView({
+  orders,
+  customerName,
+  onShop,
+}: {
+  orders: AppState['orders'];
+  customerName: string;
+  onShop: () => void;
+}) {
+  const stages = ['Placed', 'Preparing', 'Ready for dispatch', 'Completed'];
+  const stageFor = (status: string) =>
+    status === 'COMPLETED'
+      ? 3
+      : status === 'READY_FOR_DISPATCH' || status === 'DISPATCHED'
+        ? 2
+        : status === 'WAITING_FOR_PICK' ||
+            status === 'PICKING' ||
+            status === 'PICKED'
+          ? 1
+          : 0;
+  return (
+    <>
+      <PageHead
+        eyebrow="Customer panel"
+        title="My orders"
+        sub={`Live fulfilment status for ${customerName || 'this customer'}.`}
+        action={
+          <button
+            onClick={onShop}
+            className="rounded-lg bg-[#1262e3] px-4 py-2 text-sm font-black text-white"
+          >
+            Continue shopping
+          </button>
+        }
+      />
+      <div className="grid gap-4">
+        {orders.length ? (
+          orders.map((order) => {
+            const active = stageFor(order.status);
+            return (
+              <article
+                key={order.id}
+                className="rounded-2xl border bg-white p-6 shadow-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[.12em] text-[#1262e3]">
+                      {order.code}
+                    </p>
+                    <h2 className="mt-1 text-xl font-black">
+                      {order.itemCount} units · {money(order.totalPaise)}
+                    </h2>
+                    <p className="mt-1 text-sm text-[#69768a]">
+                      Allocated to {order.warehouseCode ?? 'network allocation'}{' '}
+                      · {new Date(order.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className={`status ${statusClass(order.status)}`}>
+                    {order.status.replaceAll('_', ' ')}
+                  </span>
+                </div>
+                <div className="mt-6 grid grid-cols-4 gap-2">
+                  {stages.map((stage, index) => (
+                    <div key={stage}>
+                      <div
+                        className={`h-2 rounded-full ${index <= active ? 'bg-[#1262e3]' : 'bg-[#e7ecf1]'}`}
+                      />
+                      <p
+                        className={`mt-2 text-xs font-bold ${index <= active ? 'text-[#14213d]' : 'text-[#929cab]'}`}
+                      >
+                        {stage}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <Empty text="No orders for this customer yet. Add products and checkout to create a live warehouse task." />
+        )}
+      </div>
+    </>
+  );
+}
+
+function WorkerTaskQueue({
+  tasks,
+  selectedId,
+  session,
+  onSelect,
+  onLogout,
+}: {
+  tasks: PickTask[];
+  selectedId: string;
+  session: StaffSession;
+  onSelect: (id: string) => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="mb-5 rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[.13em] text-[#1262e3]">
+            {session.warehouseCode} task queue
+          </p>
+          <p className="mt-1 text-sm font-bold">
+            {session.displayName} · {tasks.length} active tasks
+          </p>
+        </div>
+        <button
+          onClick={onLogout}
+          className="flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-black text-[#68768a]"
+        >
+          <LogOut size={15} />
+          Sign out
+        </button>
+      </div>
+      {tasks.length > 0 && (
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          {tasks.map((task) => (
+            <button
+              key={task.id}
+              onClick={() => onSelect(task.id)}
+              className={`min-w-40 rounded-xl border p-3 text-left ${selectedId === task.id ? 'border-[#1262e3] bg-[#edf5ff]' : 'bg-white'}`}
+            >
+              <b className="block text-sm">{task.code}</b>
+              <span className="mt-1 block text-xs text-[#748095]">
+                {task.orderCode} · {task.items.length} stops
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkerView({
   task,
   busy,
+  employeeCode,
   onStart,
   onConfirm,
   onMissing,
 }: {
   task?: PickTask;
   busy: boolean;
+  employeeCode: string;
   onStart: (id: string) => void;
   onConfirm: (id: string, b: string) => void;
   onMissing: (id: string) => void;
@@ -1283,7 +1801,7 @@ function WorkerView({
     return (
       <>
         <PageHead
-          eyebrow="Employee · EMP-1042"
+          eyebrow={`Employee · ${employeeCode}`}
           title="Worker picking"
           sub="Mobile-first verified picking and dynamic rerouting."
         />
@@ -1293,7 +1811,7 @@ function WorkerView({
   return (
     <>
       <PageHead
-        eyebrow="Employee · EMP-1042"
+        eyebrow={`Employee · ${employeeCode}`}
         title={`${task.code} · ${task.orderCode}`}
         sub={`${picked} / ${task.items.length} picked · ${Math.round(task.totalDistance)} m optimized route`}
         action={
@@ -1395,8 +1913,8 @@ function WorkerView({
                 Start at warehouse check-in
               </h2>
               <p className="mt-2 text-sm text-[#68768a]">
-                Starting attributes the task to EMP-1042 and activates the first
-                destination.
+                Starting attributes the task to your verified employee session
+                and activates the first destination.
               </p>
               <button
                 disabled={busy}

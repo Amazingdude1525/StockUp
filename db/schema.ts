@@ -1,15 +1,201 @@
-import { integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
-export const warehouses = sqliteTable('warehouses', { id: text('id').primaryKey(), code: text('code').notNull().unique(), name: text('name').notNull(), city: text('city').notNull(), latitude: real('latitude').notNull(), longitude: real('longitude').notNull(), status: text('status').notNull(), checkinCode: text('checkin_code').notNull(), loadPercent: integer('load_percent').notNull().default(0) });
-export const products = sqliteTable('products', { id: text('id').primaryKey(), sku: text('sku').notNull().unique(), barcode: text('barcode').notNull().unique(), name: text('name').notNull(), category: text('category').notNull(), pricePaise: integer('price_paise').notNull(), reorderPoint: integer('reorder_point').notNull().default(10) }, (t) => [uniqueIndex('idx_products_sku').on(t.sku), uniqueIndex('idx_products_barcode').on(t.barcode)]);
-export const bins = sqliteTable('bins', { id: text('id').primaryKey(), warehouseId: text('warehouse_id').notNull().references(() => warehouses.id), rowCode: text('row_code').notNull(), code: text('code').notNull(), locationCode: text('location_code').notNull().unique(), x: real('x').notNull(), y: real('y').notNull(), width: real('width').notNull(), height: real('height').notNull(), capacity: integer('capacity').notNull(), accessNode: text('access_node').notNull() }, (t) => [uniqueIndex('idx_bins_location_code').on(t.locationCode)]);
-export const inventoryLocations = sqliteTable('inventory_locations', { id: text('id').primaryKey(), productId: text('product_id').notNull().references(() => products.id), warehouseId: text('warehouse_id').notNull().references(() => warehouses.id), binId: text('bin_id').notNull().references(() => bins.id), quantityOnHand: integer('quantity_on_hand').notNull(), quantityReserved: integer('quantity_reserved').notNull().default(0) }, (t) => [uniqueIndex('idx_inventory_product_bin').on(t.productId, t.binId)]);
-export const orders = sqliteTable('orders', { id: text('id').primaryKey(), code: text('code').notNull().unique(), customerName: text('customer_name').notNull(), status: text('status').notNull(), warehouseId: text('warehouse_id').references(() => warehouses.id), totalPaise: integer('total_paise').notNull(), allocationReason: text('allocation_reason'), isSimulated: integer('is_simulated', { mode: 'boolean' }).notNull().default(false), createdAt: text('created_at').notNull() });
-export const orderItems = sqliteTable('order_items', { id: text('id').primaryKey(), orderId: text('order_id').notNull().references(() => orders.id), productId: text('product_id').notNull().references(() => products.id), quantity: integer('quantity').notNull() });
-export const inventoryReservations = sqliteTable('inventory_reservations', { id: text('id').primaryKey(), orderId: text('order_id').notNull().references(() => orders.id), inventoryLocationId: text('inventory_location_id').notNull().references(() => inventoryLocations.id), quantity: integer('quantity').notNull(), status: text('status').notNull(), createdAt: text('created_at').notNull() });
-export const pickTasks = sqliteTable('pick_tasks', { id: text('id').primaryKey(), code: text('code').notNull().unique(), orderId: text('order_id').notNull().references(() => orders.id), warehouseId: text('warehouse_id').notNull().references(() => warehouses.id), employeeCode: text('employee_code'), status: text('status').notNull(), routeJson: text('route_json').notNull(), totalDistance: real('total_distance').notNull(), createdAt: text('created_at').notNull() });
-export const pickTaskItems = sqliteTable('pick_task_items', { id: text('id').primaryKey(), pickTaskId: text('pick_task_id').notNull().references(() => pickTasks.id), orderItemId: text('order_item_id').notNull().references(() => orderItems.id), inventoryLocationId: text('inventory_location_id').notNull().references(() => inventoryLocations.id), sequence: integer('sequence').notNull(), quantity: integer('quantity').notNull(), status: text('status').notNull() });
-export const stockMovements = sqliteTable('stock_movements', { id: text('id').primaryKey(), productId: text('product_id').notNull().references(() => products.id), warehouseId: text('warehouse_id').notNull().references(() => warehouses.id), sourceBinId: text('source_bin_id'), destinationBinId: text('destination_bin_id'), quantity: integer('quantity').notNull(), movementType: text('movement_type').notNull(), orderId: text('order_id'), employeeCode: text('employee_code'), referenceId: text('reference_id').notNull(), createdAt: text('created_at').notNull(), metadata: text('metadata').notNull().default('{}') });
-export const inventoryExceptions = sqliteTable('inventory_exceptions', { id: text('id').primaryKey(), pickTaskItemId: text('pick_task_item_id').notNull(), productId: text('product_id').notNull(), warehouseId: text('warehouse_id').notNull(), binId: text('bin_id').notNull(), employeeCode: text('employee_code').notNull(), resolution: text('resolution'), createdAt: text('created_at').notNull() });
-export const graphNodes = sqliteTable('warehouse_graph_nodes', { id: text('id').primaryKey(), warehouseId: text('warehouse_id').notNull(), x: real('x').notNull(), y: real('y').notNull(), nodeType: text('node_type').notNull() });
-export const graphEdges = sqliteTable('warehouse_graph_edges', { id: text('id').primaryKey(), warehouseId: text('warehouse_id').notNull(), fromNode: text('from_node').notNull(), toNode: text('to_node').notNull(), distance: real('distance').notNull(), bidirectional: integer('bidirectional', { mode: 'boolean' }).notNull().default(true), blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false) });
+export const warehouses = sqliteTable('warehouses', {
+  id: text('id').primaryKey(),
+  code: text('code').notNull().unique(),
+  name: text('name').notNull(),
+  city: text('city').notNull(),
+  latitude: real('latitude').notNull(),
+  longitude: real('longitude').notNull(),
+  status: text('status').notNull(),
+  checkinCode: text('checkin_code').notNull(),
+  loadPercent: integer('load_percent').notNull().default(0),
+});
+export const products = sqliteTable(
+  'products',
+  {
+    id: text('id').primaryKey(),
+    sku: text('sku').notNull().unique(),
+    barcode: text('barcode').notNull().unique(),
+    name: text('name').notNull(),
+    category: text('category').notNull(),
+    pricePaise: integer('price_paise').notNull(),
+    reorderPoint: integer('reorder_point').notNull().default(10),
+  },
+  (t) => [
+    uniqueIndex('idx_products_sku').on(t.sku),
+    uniqueIndex('idx_products_barcode').on(t.barcode),
+  ],
+);
+export const bins = sqliteTable(
+  'bins',
+  {
+    id: text('id').primaryKey(),
+    warehouseId: text('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    rowCode: text('row_code').notNull(),
+    code: text('code').notNull(),
+    locationCode: text('location_code').notNull().unique(),
+    x: real('x').notNull(),
+    y: real('y').notNull(),
+    width: real('width').notNull(),
+    height: real('height').notNull(),
+    capacity: integer('capacity').notNull(),
+    accessNode: text('access_node').notNull(),
+  },
+  (t) => [uniqueIndex('idx_bins_location_code').on(t.locationCode)],
+);
+export const inventoryLocations = sqliteTable(
+  'inventory_locations',
+  {
+    id: text('id').primaryKey(),
+    productId: text('product_id')
+      .notNull()
+      .references(() => products.id),
+    warehouseId: text('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    binId: text('bin_id')
+      .notNull()
+      .references(() => bins.id),
+    quantityOnHand: integer('quantity_on_hand').notNull(),
+    quantityReserved: integer('quantity_reserved').notNull().default(0),
+  },
+  (t) => [uniqueIndex('idx_inventory_product_bin').on(t.productId, t.binId)],
+);
+export const orders = sqliteTable('orders', {
+  id: text('id').primaryKey(),
+  code: text('code').notNull().unique(),
+  customerName: text('customer_name').notNull(),
+  status: text('status').notNull(),
+  warehouseId: text('warehouse_id').references(() => warehouses.id),
+  totalPaise: integer('total_paise').notNull(),
+  allocationReason: text('allocation_reason'),
+  isSimulated: integer('is_simulated', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  createdAt: text('created_at').notNull(),
+});
+export const orderItems = sqliteTable('order_items', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id')
+    .notNull()
+    .references(() => orders.id),
+  productId: text('product_id')
+    .notNull()
+    .references(() => products.id),
+  quantity: integer('quantity').notNull(),
+});
+export const inventoryReservations = sqliteTable('inventory_reservations', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id')
+    .notNull()
+    .references(() => orders.id),
+  inventoryLocationId: text('inventory_location_id')
+    .notNull()
+    .references(() => inventoryLocations.id),
+  quantity: integer('quantity').notNull(),
+  status: text('status').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+export const pickTasks = sqliteTable('pick_tasks', {
+  id: text('id').primaryKey(),
+  code: text('code').notNull().unique(),
+  orderId: text('order_id')
+    .notNull()
+    .references(() => orders.id),
+  warehouseId: text('warehouse_id')
+    .notNull()
+    .references(() => warehouses.id),
+  employeeCode: text('employee_code'),
+  status: text('status').notNull(),
+  routeJson: text('route_json').notNull(),
+  totalDistance: real('total_distance').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+export const pickTaskItems = sqliteTable('pick_task_items', {
+  id: text('id').primaryKey(),
+  pickTaskId: text('pick_task_id')
+    .notNull()
+    .references(() => pickTasks.id),
+  orderItemId: text('order_item_id')
+    .notNull()
+    .references(() => orderItems.id),
+  inventoryLocationId: text('inventory_location_id')
+    .notNull()
+    .references(() => inventoryLocations.id),
+  sequence: integer('sequence').notNull(),
+  quantity: integer('quantity').notNull(),
+  status: text('status').notNull(),
+});
+export const stockMovements = sqliteTable('stock_movements', {
+  id: text('id').primaryKey(),
+  productId: text('product_id')
+    .notNull()
+    .references(() => products.id),
+  warehouseId: text('warehouse_id')
+    .notNull()
+    .references(() => warehouses.id),
+  sourceBinId: text('source_bin_id'),
+  destinationBinId: text('destination_bin_id'),
+  quantity: integer('quantity').notNull(),
+  movementType: text('movement_type').notNull(),
+  orderId: text('order_id'),
+  employeeCode: text('employee_code'),
+  referenceId: text('reference_id').notNull(),
+  createdAt: text('created_at').notNull(),
+  metadata: text('metadata').notNull().default('{}'),
+});
+export const inventoryExceptions = sqliteTable('inventory_exceptions', {
+  id: text('id').primaryKey(),
+  pickTaskItemId: text('pick_task_item_id').notNull(),
+  productId: text('product_id').notNull(),
+  warehouseId: text('warehouse_id').notNull(),
+  binId: text('bin_id').notNull(),
+  employeeCode: text('employee_code').notNull(),
+  resolution: text('resolution'),
+  createdAt: text('created_at').notNull(),
+});
+export const graphNodes = sqliteTable('warehouse_graph_nodes', {
+  id: text('id').primaryKey(),
+  warehouseId: text('warehouse_id').notNull(),
+  x: real('x').notNull(),
+  y: real('y').notNull(),
+  nodeType: text('node_type').notNull(),
+});
+export const graphEdges = sqliteTable('warehouse_graph_edges', {
+  id: text('id').primaryKey(),
+  warehouseId: text('warehouse_id').notNull(),
+  fromNode: text('from_node').notNull(),
+  toNode: text('to_node').notNull(),
+  distance: real('distance').notNull(),
+  bidirectional: integer('bidirectional', { mode: 'boolean' })
+    .notNull()
+    .default(true),
+  blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false),
+});
+
+export const staffAccess = sqliteTable('staff_access', {
+  code: text('code').primaryKey(),
+  warehouseCode: text('warehouse_code').notNull(),
+  warehousePassHash: text('warehouse_pass_hash').notNull(),
+  pinHash: text('pin_hash').notNull(),
+  role: text('role').notNull(),
+  displayName: text('display_name').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+export const staffSessions = sqliteTable('staff_sessions', {
+  tokenHash: text('token_hash').primaryKey(),
+  staffCode: text('staff_code')
+    .notNull()
+    .references(() => staffAccess.code),
+  expiresAt: text('expires_at').notNull(),
+  createdAt: text('created_at').notNull(),
+});

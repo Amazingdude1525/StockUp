@@ -1,4 +1,6 @@
 PRAGMA foreign_keys = OFF;
+DELETE FROM staff_sessions;
+DELETE FROM staff_access;
 DELETE FROM inventory_exceptions;
 DELETE FROM stock_movements;
 DELETE FROM pick_task_items;

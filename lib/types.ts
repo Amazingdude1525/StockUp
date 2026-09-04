@@ -84,3 +84,12 @@ export type AppState = {
     itemCount: number;
   }>;
 };
+
+export type StaffSession = {
+  token: string;
+  staffCode: string;
+  displayName: string;
+  role: 'PICKER' | 'WAREHOUSE_MANAGER' | 'NETWORK_ADMIN';
+  warehouseCode: string | null;
+  expiresAt: string;
+};

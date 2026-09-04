@@ -10,6 +10,173 @@ import {
 type D1 = D1Database;
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+type StaffIdentity = {
+  staffCode: string;
+  displayName: string;
+  role: 'PICKER' | 'WAREHOUSE_MANAGER' | 'NETWORK_ADMIN';
+  warehouseCode: string | null;
+};
+
+const hex = (bytes: ArrayBuffer) =>
+  [...new Uint8Array(bytes)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+
+async function hashCredential(value: string, salt: string) {
+  const material = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(value),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  return hex(
+    await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        hash: 'SHA-256',
+        salt: new TextEncoder().encode('stockup:' + salt),
+        iterations: 120000,
+      },
+      material,
+      256,
+    ),
+  );
+}
+
+async function hashToken(value: string) {
+  return hex(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
+  );
+}
+
+async function ensureAccessSchema(db: D1) {
+  await db.batch([
+    db.prepare(
+      'CREATE TABLE IF NOT EXISTS staff_access(code TEXT PRIMARY KEY,warehouse_code TEXT NOT NULL,warehouse_pass_hash TEXT NOT NULL,pin_hash TEXT NOT NULL,role TEXT NOT NULL,display_name TEXT NOT NULL,created_at TEXT NOT NULL)',
+    ),
+    db.prepare(
+      'CREATE TABLE IF NOT EXISTS staff_sessions(token_hash TEXT PRIMARY KEY,staff_code TEXT NOT NULL,expires_at TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(staff_code) REFERENCES staff_access(code) ON DELETE CASCADE)',
+    ),
+    db.prepare(
+      'CREATE INDEX IF NOT EXISTS idx_staff_sessions_expiry ON staff_sessions(expires_at)',
+    ),
+  ]);
+  const existing = await db
+    .prepare('SELECT COUNT(*) count FROM staff_access')
+    .first<{ count: number }>();
+  if ((existing?.count ?? 0) > 0) return;
+  const demo = [
+    ['EMP1001', 'WH01', 'STOCK01', '1234', 'PICKER', 'Meera Singh'],
+    ['EMP1042', 'WH02', 'STOCK02', '1234', 'PICKER', 'Ravi Kumar'],
+    ['EMP1077', 'WH03', 'STOCK03', '1234', 'WAREHOUSE_MANAGER', 'Nisha Verma'],
+    [
+      'ADMIN100',
+      'NETWORK',
+      'STOCKADMIN',
+      '2026',
+      'NETWORK_ADMIN',
+      'Arjun Kapoor',
+    ],
+  ] as const;
+  for (const [
+    code,
+    warehouseCode,
+    warehousePass,
+    pin,
+    role,
+    displayName,
+  ] of demo) {
+    await db
+      .prepare(
+        'INSERT OR IGNORE INTO staff_access(code,warehouse_code,warehouse_pass_hash,pin_hash,role,display_name,created_at) VALUES(?,?,?,?,?,?,?)',
+      )
+      .bind(
+        code,
+        warehouseCode,
+        await hashCredential(warehousePass, warehouseCode),
+        await hashCredential(pin, code),
+        role,
+        displayName,
+        now(),
+      )
+      .run();
+  }
+}
+
+async function staffLogin(db: D1, body: any) {
+  const code = String(body.employeeCode || '')
+    .trim()
+    .toUpperCase();
+  const warehouseCode = String(body.warehouseCode || '')
+    .trim()
+    .toUpperCase();
+  const staff = await db
+    .prepare('SELECT * FROM staff_access WHERE code=? AND warehouse_code=?')
+    .bind(code, warehouseCode)
+    .first<any>();
+  if (!staff) throw new Error('Invalid warehouse or employee credentials.');
+  const [warehousePassHash, pinHash] = await Promise.all([
+    hashCredential(String(body.warehousePasscode || ''), warehouseCode),
+    hashCredential(String(body.pin || ''), code),
+  ]);
+  if (
+    warehousePassHash !== staff.warehouse_pass_hash ||
+    pinHash !== staff.pin_hash
+  )
+    throw new Error('Invalid warehouse or employee credentials.');
+  const token = crypto.randomUUID() + crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+  await db
+    .prepare(
+      'INSERT INTO staff_sessions(token_hash,staff_code,expires_at,created_at) VALUES(?,?,?,?)',
+    )
+    .bind(await hashToken(token), code, expiresAt, now())
+    .run();
+  return {
+    token,
+    staffCode: code,
+    displayName: staff.display_name,
+    role: staff.role,
+    warehouseCode: warehouseCode === 'NETWORK' ? null : warehouseCode,
+    expiresAt,
+  };
+}
+
+async function requireStaff(
+  db: D1,
+  body: any,
+  roles: StaffIdentity['role'][],
+): Promise<StaffIdentity> {
+  const token = String(body.sessionToken || '');
+  if (!token) throw new Error('Staff sign-in required.');
+  const row = await db
+    .prepare(
+      'SELECT a.* FROM staff_sessions s JOIN staff_access a ON a.code=s.staff_code WHERE s.token_hash=? AND s.expires_at>?',
+    )
+    .bind(await hashToken(token), now())
+    .first<any>();
+  if (!row || !roles.includes(row.role))
+    throw new Error(
+      'This staff account is not permitted to perform that action.',
+    );
+  return {
+    staffCode: row.code,
+    displayName: row.display_name,
+    role: row.role,
+    warehouseCode: row.warehouse_code === 'NETWORK' ? null : row.warehouse_code,
+  };
+}
+
+async function staffLogout(db: D1, body: any) {
+  if (body.sessionToken)
+    await db
+      .prepare('DELETE FROM staff_sessions WHERE token_hash=?')
+      .bind(await hashToken(String(body.sessionToken)))
+      .run();
+  return { signedOut: true };
+}
 type SeedProduct = [string, string, string, string, string, number];
 const showcase: SeedProduct[] = [
   ['P001', 'COKE750', '8901764020012', 'Coca-Cola 750 ml', 'Beverages', 4500],
@@ -559,7 +726,7 @@ async function refreshTaskRoute(db: D1, taskId: string) {
     .run();
 }
 
-async function confirmPick(db: D1, body: any) {
+async function confirmPick(db: D1, body: any, staff: StaffIdentity) {
   const row = await db
     .prepare(
       'SELECT pti.*,p.barcode,p.id product_id,pt.order_id,pt.warehouse_id,pt.status task_status,il.bin_id FROM pick_task_items pti JOIN order_items oi ON oi.id=pti.order_item_id JOIN products p ON p.id=oi.product_id JOIN pick_tasks pt ON pt.id=pti.pick_task_id JOIN inventory_locations il ON il.id=pti.inventory_location_id WHERE pti.id=?',
@@ -567,6 +734,8 @@ async function confirmPick(db: D1, body: any) {
     .bind(body.itemId)
     .first<any>();
   if (!row) throw new Error('Pick item not found.');
+  if (staff.warehouseCode && staff.warehouseCode !== row.warehouse_id)
+    throw new Error('This task belongs to another warehouse.');
   if (row.task_status === 'ASSIGNED')
     throw new Error('Start the pick task before confirming inventory.');
   if (String(body.barcode).trim() !== row.barcode)
@@ -605,7 +774,7 @@ async function confirmPick(db: D1, body: any) {
         row.quantity,
         'OUTWARD',
         row.order_id,
-        'EMP-1042',
+        staff.staffCode,
         row.id,
         created,
         JSON.stringify({ verifiedBarcode: body.barcode }),
@@ -625,7 +794,7 @@ async function confirmPick(db: D1, body: any) {
   return { verified: true };
 }
 
-async function reportMissing(db: D1, body: any) {
+async function reportMissing(db: D1, body: any, staff: StaffIdentity) {
   const row = await db
     .prepare(
       'SELECT pti.*,oi.product_id,pt.order_id,pt.warehouse_id,il.bin_id FROM pick_task_items pti JOIN order_items oi ON oi.id=pti.order_item_id JOIN pick_tasks pt ON pt.id=pti.pick_task_id JOIN inventory_locations il ON il.id=pti.inventory_location_id WHERE pti.id=?',
@@ -633,6 +802,8 @@ async function reportMissing(db: D1, body: any) {
     .bind(body.itemId)
     .first<any>();
   if (!row) throw new Error('Pick item not found.');
+  if (staff.warehouseCode && staff.warehouseCode !== row.warehouse_id)
+    throw new Error('This task belongs to another warehouse.');
   const alt = await db
     .prepare(
       'SELECT il.id,b.location_code,b.x,b.y FROM inventory_locations il JOIN bins b ON b.id=il.bin_id WHERE il.product_id=? AND il.warehouse_id=? AND il.id<>? AND il.quantity_on_hand-il.quantity_reserved>=? ORDER BY il.quantity_on_hand-il.quantity_reserved DESC LIMIT 1',
@@ -658,7 +829,7 @@ async function reportMissing(db: D1, body: any) {
         row.product_id,
         row.warehouse_id,
         row.bin_id,
-        'EMP-1042',
+        staff.staffCode,
         resolution,
         now(),
       ),
@@ -695,20 +866,28 @@ async function reportMissing(db: D1, body: any) {
   return { resolution, rerouted: Boolean(alt) };
 }
 
-async function startTask(db: D1, body: any) {
+async function startTask(db: D1, body: any, staff: StaffIdentity) {
   const task = await db
     .prepare('SELECT id,order_id,status FROM pick_tasks WHERE id=?')
     .bind(body.taskId)
     .first<any>();
   if (!task) throw new Error('Pick task not found.');
+  const taskWarehouse = await db
+    .prepare(
+      'SELECT code FROM warehouses WHERE id=(SELECT warehouse_id FROM pick_tasks WHERE id=?)',
+    )
+    .bind(task.id)
+    .first<{ code: string }>();
+  if (staff.warehouseCode && staff.warehouseCode !== taskWarehouse?.code)
+    throw new Error('This task belongs to another warehouse.');
   if (task.status !== 'ASSIGNED')
     throw new Error('Only assigned tasks can be started.');
   await db.batch([
     db
       .prepare(
-        "UPDATE pick_tasks SET status='STARTED',employee_code='EMP-1042' WHERE id=? AND status='ASSIGNED'",
+        "UPDATE pick_tasks SET status='STARTED',employee_code=? WHERE id=? AND status='ASSIGNED'",
       )
-      .bind(task.id),
+      .bind(staff.staffCode, task.id),
     db
       .prepare(
         "UPDATE orders SET status='PICKING' WHERE id=? AND status='WAITING_FOR_PICK'",
@@ -718,7 +897,7 @@ async function startTask(db: D1, body: any) {
   return { taskId: task.id, status: 'STARTED' };
 }
 
-async function transferInventory(db: D1, body: any) {
+async function transferInventory(db: D1, body: any, staff: StaffIdentity) {
   const quantity = Number(body.quantity);
   if (!Number.isInteger(quantity) || quantity <= 0)
     throw new Error('Transfer quantity must be a positive integer.');
@@ -734,6 +913,10 @@ async function transferInventory(db: D1, body: any) {
     .first<any>();
   if (!source || !destination)
     throw new Error('Source inventory or destination bin not found.');
+  if (staff.warehouseCode && staff.warehouseCode !== source.warehouse_id)
+    throw new Error(
+      'Warehouse managers can transfer stock only within their assigned warehouse.',
+    );
   if (source.warehouse_id !== destination.warehouse_id)
     throw new Error(
       'Adaptive slotting creates intra-warehouse transfers only.',
@@ -789,7 +972,7 @@ async function transferInventory(db: D1, body: any) {
         quantity,
         'TRANSFER',
         null,
-        'EMP-1042',
+        staff.staffCode,
         referenceId,
         now(),
         JSON.stringify({ reason: 'ADAPTIVE_SLOTTING' }),
@@ -798,7 +981,7 @@ async function transferInventory(db: D1, body: any) {
   return { referenceId, destinationLocationCode: destination.location_code };
 }
 
-async function simulateSurge(db: D1) {
+async function simulateSurge(db: D1, staff: StaffIdentity) {
   let created = 0;
   for (let i = 0; i < 25; i++) {
     try {
@@ -814,12 +997,13 @@ async function simulateSurge(db: D1) {
   }
   if (!created)
     throw new Error('The surge could not reserve any additional inventory.');
-  return { created };
+  return { created, initiatedBy: staff.staffCode };
 }
 
 export async function GET() {
   try {
     const db = env.DB as D1;
+    await ensureAccessSchema(db);
     await seed(db);
     return NextResponse.json(await state(db));
   } catch (e) {
@@ -832,18 +1016,44 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const db = env.DB as D1;
+    await ensureAccessSchema(db);
     await seed(db);
     const body: any = await req.json();
     let result;
-    if (body.action === 'createOrder') result = await createOrder(db, body);
+    if (body.action === 'staffLogin') result = await staffLogin(db, body);
+    else if (body.action === 'staffLogout')
+      result = await staffLogout(db, body);
+    else if (body.action === 'createOrder')
+      result = await createOrder(db, body);
     else if (body.action === 'confirmPick')
-      result = await confirmPick(db, body);
+      result = await confirmPick(
+        db,
+        body,
+        await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
+      );
     else if (body.action === 'reportMissing')
-      result = await reportMissing(db, body);
-    else if (body.action === 'startTask') result = await startTask(db, body);
+      result = await reportMissing(
+        db,
+        body,
+        await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
+      );
+    else if (body.action === 'startTask')
+      result = await startTask(
+        db,
+        body,
+        await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
+      );
     else if (body.action === 'transferInventory')
-      result = await transferInventory(db, body);
-    else if (body.action === 'simulateSurge') result = await simulateSurge(db);
+      result = await transferInventory(
+        db,
+        body,
+        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+      );
+    else if (body.action === 'simulateSurge')
+      result = await simulateSurge(
+        db,
+        await requireStaff(db, body, ['NETWORK_ADMIN']),
+      );
     else throw new Error('Unsupported action.');
     return NextResponse.json({ ok: true, result, state: await state(db) });
   } catch (e) {
