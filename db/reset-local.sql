@@ -1,0 +1,13 @@
+PRAGMA foreign_keys = OFF;
+DELETE FROM inventory_exceptions;
+DELETE FROM stock_movements;
+DELETE FROM pick_task_items;
+DELETE FROM pick_tasks;
+DELETE FROM inventory_reservations;
+DELETE FROM order_items;
+DELETE FROM orders;
+DELETE FROM inventory_locations;
+DELETE FROM bins;
+DELETE FROM products;
+DELETE FROM warehouses;
+PRAGMA foreign_keys = ON;
