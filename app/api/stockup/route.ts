@@ -1255,10 +1255,6 @@ async function handleCreatePickWave(db: D1, body: any, staff: StaffIdentity) {
 }
 
 async function getDatabase(): Promise<D1> {
-  try {
-    const workerEnv = await import('cloudflare:workers' as any);
-    if (workerEnv?.env?.DB) return workerEnv.env.DB as D1;
-  } catch {}
   return getInMemoryD1() as D1;
 }
 
