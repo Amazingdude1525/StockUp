@@ -20,8 +20,12 @@ import {
   Minus,
   PackageCheck,
   PackageSearch,
+  Pause,
+  Play,
   Plus,
+  RotateCcw,
   Route,
+  Navigation,
   Search,
   ShieldCheck,
   Store,
@@ -1246,16 +1250,28 @@ function WarehouseView({
               <rect
                 x="45"
                 y="485"
-                width="150"
+                width="160"
                 height="82"
-                rx="10"
-                fill="#dcecff"
-                stroke="#1262e3"
+                rx="12"
+                fill="#e0f2fe"
+                stroke="#0284c7"
+                strokeWidth="2.5"
               />
-              <text x="120" y="522" textAnchor="middle" className="map-label">
+              <g>
+                <circle
+                  cx="70"
+                  cy="526"
+                  r="13"
+                  fill="#0f172a"
+                  stroke="white"
+                  strokeWidth="3.5"
+                />
+                <circle cx="70" cy="526" r="4" fill="#38bdf8" />
+              </g>
+              <text x="96" y="522" textAnchor="start" className="map-label" fontWeight="900" fill="#0f172a">
                 CHECK-IN
               </text>
-              <text x="120" y="542" textAnchor="middle" className="map-small">
+              <text x="96" y="542" textAnchor="start" className="map-small" fontWeight="700" fill="#475569">
                 {warehouse.checkinCode}
               </text>
               {[80, 185, 290, 395].map((y, r) => (
@@ -1307,17 +1323,7 @@ function WarehouseView({
                   strokeLinejoin="round"
                 />
               )}
-              <g>
-                <circle
-                  cx="90"
-                  cy="525"
-                  r="13"
-                  fill="#12213f"
-                  stroke="white"
-                  strokeWidth="5"
-                />
-                <circle cx="90" cy="525" r="3" fill="#7ed957" />
-              </g>
+
               {bins.map((b, i) => (
                 <g
                   key={b.inventoryId}
@@ -1965,87 +1971,13 @@ function WorkerView({
         }
       />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
-        <div className="overflow-hidden rounded-2xl border bg-[#edf3f7]">
-          <div className="border-b bg-white px-5 py-4 text-sm font-bold">
-            Live pick route · check-in → all stops → check-in
-          </div>
-          <div className="warehouse-canvas">
-            <svg viewBox="0 0 820 620" className="h-full w-full">
-              <rect
-                x="24"
-                y="22"
-                width="772"
-                height="572"
-                rx="18"
-                fill="#f7fafc"
-                stroke="#aebbc9"
-                strokeWidth="3"
-              />
-              {[80, 185, 290, 395].map((y, r) => (
-                <g key={y}>
-                  <rect
-                    x="115"
-                    y={y}
-                    width="595"
-                    height="52"
-                    rx="5"
-                    fill="#263956"
-                  />
-                  <text
-                    x="80"
-                    y={y + 31}
-                    textAnchor="middle"
-                    className="row-label"
-                  >
-                    R0{r + 1}
-                  </text>
-                </g>
-              ))}
-              <polyline
-                points={task.route.map((p) => `${p.x},${p.y}`).join(' ')}
-                fill="none"
-                stroke="#1473e6"
-                strokeWidth="8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle
-                cx="60"
-                cy="520"
-                r="14"
-                fill="#12213f"
-                stroke="white"
-                strokeWidth="5"
-              />
-              {task.items.map((i, index) => (
-                <g key={i.id}>
-                  <circle
-                    cx={i.x + 37}
-                    cy={i.y + 21}
-                    r={next?.id === i.id ? 16 : 12}
-                    fill={
-                      i.status === 'PICKED'
-                        ? '#7ed957'
-                        : next?.id === i.id
-                          ? '#f59e0b'
-                          : '#fff'
-                    }
-                    stroke="#12213f"
-                    strokeWidth="4"
-                  />
-                  <text
-                    x={i.x + 37}
-                    y={i.y + 26}
-                    textAnchor="middle"
-                    fontWeight="900"
-                    fontSize="12"
-                  >
-                    {i.status === 'PICKED' ? '✓' : index + 1}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          </div>
+        <div>
+          <PickRouteSimulator
+            route={task.route}
+            items={task.items}
+            totalDistance={task.totalDistance}
+            checkinCode="CP01"
+          />
         </div>
         <aside>
           {task.status === 'ASSIGNED' ? (
@@ -2700,6 +2632,286 @@ function JudgeGuideModal({
               Simulate Surge (5 Orders)
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PickRouteSimulator({
+  route,
+  items,
+  totalDistance,
+  checkinCode = 'CP01',
+  zoom = 1,
+  onBinSelect,
+}: {
+  route: Array<{ x: number; y: number }>;
+  items: Array<{
+    id: string;
+    productName: string;
+    locationCode: string;
+    binCode: string;
+    quantity: number;
+    barcode: string;
+    status: string;
+    x: number;
+    y: number;
+  }>;
+  totalDistance: number;
+  checkinCode?: string;
+  zoom?: number;
+  onBinSelect?: (id: string) => void;
+}) {
+  const [playing, setPlaying] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [speedMultiplier, setSpeedMultiplier] = useState<1 | 2 | 4>(2);
+
+  const segments = useMemo(() => {
+    if (!route || route.length < 2) return [];
+    let cum = 0;
+    const segs = [];
+    for (let i = 0; i < route.length - 1; i++) {
+      const p1 = route[i];
+      const p2 = route[i + 1];
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      segs.push({ p1, p2, startDist: cum, length: dist });
+      cum += dist;
+    }
+    return segs;
+  }, [route]);
+
+  const totalPathLength = useMemo(() => {
+    return segments.reduce((s, seg) => s + seg.length, 0) || 1;
+  }, [segments]);
+
+  useEffect(() => {
+    if (!playing || totalPathLength <= 0) return;
+    let animId: number;
+    let lastTime = performance.now();
+
+    const step = (now: number) => {
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      setProgress((prev) => {
+        const next = prev + 0.08 * speedMultiplier * dt;
+        if (next >= 1) return 0;
+        return next;
+      });
+      animId = requestAnimationFrame(step);
+    };
+
+    animId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(animId);
+  }, [playing, speedMultiplier, totalPathLength]);
+
+  const currentPos = useMemo(() => {
+    if (!route || !route.length) return { x: 70, y: 526 };
+    if (progress <= 0) return route[0];
+    if (progress >= 1) return route[route.length - 1];
+
+    const currentDist = progress * totalPathLength;
+    const seg = segments.find(
+      (s) => currentDist >= s.startDist && currentDist <= s.startDist + s.length,
+    );
+
+    if (!seg || seg.length === 0) return route[0];
+    const ratio = (currentDist - seg.startDist) / seg.length;
+    return {
+      x: seg.p1.x + ratio * (seg.p2.x - seg.p1.x),
+      y: seg.p1.y + ratio * (seg.p2.y - seg.p1.y),
+    };
+  }, [progress, route, segments, totalPathLength]);
+
+  const nextItem = useMemo(() => {
+    return items.find((i) => i.status !== 'PICKED') || items[0];
+  }, [items]);
+
+  const distRemaining = Math.max(0, Math.round(totalDistance * (1 - progress)));
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-[#cbd5e1] bg-[#f8fafc] shadow-lg">
+      <div className="bg-gradient-to-r from-[#12213f] via-[#1a315b] to-[#1262e3] p-4 text-white flex flex-wrap items-center justify-between gap-3 z-10 shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="relative flex size-10 items-center justify-center rounded-xl bg-white/10 text-white shrink-0">
+            <Navigation className="animate-pulse" size={20} />
+            <span className="absolute -top-1 -right-1 flex size-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#7ed957] opacity-75"></span>
+              <span className="relative inline-flex rounded-full size-3 bg-[#7ed957]"></span>
+            </span>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-wider bg-[#7ed957] text-[#12213f] px-2 py-0.5 rounded">
+                Live A* GPS Route Simulation
+              </span>
+              <span className="text-xs font-bold text-[#b4cbe5]">
+                Speed: {(speedMultiplier * 1.5).toFixed(1)} m/s
+              </span>
+            </div>
+            <h4 className="text-sm font-black mt-0.5">
+              {nextItem ? (
+                <>Next Stop: Pick {nextItem.quantity}x {nextItem.productName} ({nextItem.locationCode || 'WH01-B001'})</>
+              ) : (
+                <>Route Complete · Returning to Packing Station</>
+              )}
+            </h4>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#9fb1cb] block">
+              Remaining Distance
+            </span>
+            <span className="text-xl font-black text-[#7ed957]">
+              {distRemaining} m
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="warehouse-canvas relative">
+        <svg
+          viewBox="0 0 820 620"
+          className="h-full w-full"
+          style={{ transform: `scale(${zoom})` }}
+        >
+          <rect x="24" y="22" width="772" height="572" rx="18" fill="#f8fafc" stroke="#94a3b8" strokeWidth="3" />
+
+          <rect x="45" y="485" width="160" height="82" rx="12" fill="#e0f2fe" stroke="#0284c7" strokeWidth="2.5" />
+          <g>
+            <circle cx="70" cy="526" r="13" fill="#0f172a" stroke="white" strokeWidth="3.5" />
+            <circle cx="70" cy="526" r="4" fill="#38bdf8" />
+          </g>
+          <text x="96" y="522" textAnchor="start" className="map-label" fontWeight="900" fill="#0f172a" fontSize="13">
+            CHECK-IN
+          </text>
+          <text x="96" y="542" textAnchor="start" className="map-small" fontWeight="700" fill="#475569" fontSize="11">
+            {checkinCode}
+          </text>
+
+          {[80, 185, 290, 395].map((y, r) => (
+            <g key={y}>
+              <rect x="115" y={y} width="595" height="52" rx="6" fill="#1e293b" />
+              <text x="80" y={y + 32} textAnchor="middle" className="row-label" fontWeight="900" fill="#64748b" fontSize="14">
+                R0{r + 1}
+              </text>
+              {[130, 240, 350, 460, 570, 680].map((x) => (
+                <rect key={x} x={x} y={y + 7} width="70" height="38" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
+              ))}
+            </g>
+          ))}
+
+          <path
+            d="M120 485 L120 455 L745 455 L745 350 L85 350 L85 245 L745 245 L745 140 L85 140"
+            fill="none"
+            stroke="#cbd5e1"
+            strokeWidth="4"
+            strokeDasharray="4 8"
+          />
+
+          {route && route.length > 0 && (
+            <polyline
+              points={route.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill="none"
+              stroke="#0284c7"
+              strokeWidth="7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {items.map((i, index) => (
+            <g
+              key={i.id}
+              onClick={() => onBinSelect && onBinSelect(i.id)}
+              className="cursor-pointer"
+            >
+              <circle
+                cx={i.x + 37}
+                cy={i.y + 21}
+                r="14"
+                fill={i.status === 'PICKED' ? '#22c55e' : nextItem?.id === i.id ? '#f59e0b' : '#38bdf8'}
+                stroke="#0f172a"
+                strokeWidth="3.5"
+              />
+              <text
+                x={i.x + 37}
+                y={i.y + 26}
+                textAnchor="middle"
+                fontWeight="900"
+                fill="#ffffff"
+                fontSize="12"
+              >
+                {i.status === 'PICKED' ? '✓' : index + 1}
+              </text>
+            </g>
+          ))}
+
+          <g transform={`translate(${currentPos.x}, ${currentPos.y})`}>
+            <circle r="22" fill="#38bdf8" opacity="0.4" className="animate-ping" />
+            <circle r="14" fill="#0f172a" stroke="#38bdf8" strokeWidth="3.5" />
+            <circle r="4.5" fill="#7ed957" />
+
+            <g transform="translate(0, -28)">
+              <rect x="-42" y="-14" width="84" height="20" rx="6" fill="#0f172a" stroke="#38bdf8" strokeWidth="1.5" />
+              <text x="0" y="0" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900">
+                🏃 Picker (GPS)
+              </text>
+            </g>
+          </g>
+        </svg>
+      </div>
+
+      <div className="border-t border-[#e2e8f0] bg-white p-3.5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPlaying(!playing)}
+            className={`flex h-9 items-center gap-2 rounded-xl px-4 text-xs font-black text-white shadow-sm transition ${playing ? 'bg-[#f59e0b] hover:bg-[#d97706]' : 'bg-[#0284c7] hover:bg-[#0369a1]'}`}
+          >
+            {playing ? <><Pause size={14} /> Pause Simulation</> : <><Play size={14} /> Play Route Simulation</>}
+          </button>
+          <button
+            onClick={() => {
+              setProgress(0);
+              setPlaying(true);
+            }}
+            className="flex h-9 items-center gap-1.5 rounded-xl border border-[#cbd5e1] bg-[#f8fafc] px-3 text-xs font-bold text-[#334155] hover:bg-[#f1f5f9]"
+          >
+            <RotateCcw size={14} /> Reset
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 min-w-[200px] flex-1 max-w-xs">
+          <span className="text-[11px] font-bold text-[#64748b]">Route Progress</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.005"
+            value={progress}
+            onChange={(e) => {
+              setProgress(parseFloat(e.target.value));
+              setPlaying(false);
+            }}
+            className="h-2 flex-1 accent-[#0284c7] cursor-pointer rounded-lg bg-[#e2e8f0]"
+          />
+          <span className="text-xs font-black text-[#0f172a] w-9">
+            {Math.round(progress * 100)}%
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1 rounded-xl bg-[#f1f5f9] p-1">
+          {([1, 2, 4] as const).map((spd) => (
+            <button
+              key={spd}
+              onClick={() => setSpeedMultiplier(spd)}
+              className={`h-7 rounded-lg px-2.5 text-[11px] font-black transition ${speedMultiplier === spd ? 'bg-[#0284c7] text-white shadow-sm' : 'text-[#64748b] hover:text-[#0f172a]'}`}
+            >
+              {spd}x
+            </button>
+          ))}
         </div>
       </div>
     </div>
