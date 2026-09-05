@@ -1283,12 +1283,77 @@ async function getDatabase(): Promise<D1> {
   return getInMemoryD1() as D1;
 }
 
+export async function getStockUpDataState() {
+  const db = await getDatabase();
+  await ensureAccessSchema(db);
+  await seed(db);
+  return await state(db);
+}
+
+export async function handleStockUpActionPayload(body: any) {
+  const db = await getDatabase();
+  await ensureAccessSchema(db);
+  await seed(db);
+  let result;
+  if (body.action === 'staffLogin') result = await staffLogin(db, body);
+  else if (body.action === 'staffLogout')
+    result = await staffLogout(db, body);
+  else if (body.action === 'createOrder')
+    result = await createOrder(db, body);
+  else if (body.action === 'createInventoryItem')
+    result = await createInventoryItem(
+      db,
+      body,
+      await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+    );
+  else if (body.action === 'adjustInventory')
+    result = await adjustInventory(
+      db,
+      body,
+      await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+    );
+  else if (body.action === 'createPickWave')
+    result = await handleCreatePickWave(
+      db,
+      body,
+      await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+    );
+  else if (body.action === 'confirmPick')
+    result = await confirmPick(
+      db,
+      body,
+      await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
+    );
+  else if (body.action === 'reportMissing')
+    result = await reportMissing(
+      db,
+      body,
+      await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
+    );
+  else if (body.action === 'startTask')
+    result = await startTask(
+      db,
+      body,
+      await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
+    );
+  else if (body.action === 'transferInventory')
+    result = await transferInventory(
+      db,
+      body,
+      await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+    );
+  else if (body.action === 'simulateSurge')
+    result = await simulateSurge(
+      db,
+      await requireStaff(db, body, ['NETWORK_ADMIN']),
+    );
+  else throw new Error('Unsupported action.');
+  return { ok: true, result, state: await state(db) };
+}
+
 export async function GET() {
   try {
-    const db = await getDatabase();
-    await ensureAccessSchema(db);
-    await seed(db);
-    return Response.json(await state(db));
+    return Response.json(await getStockUpDataState());
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : 'Database error' },
@@ -1296,67 +1361,11 @@ export async function GET() {
     );
   }
 }
+
 export async function POST(req: Request) {
   try {
-    const db = await getDatabase();
-    await ensureAccessSchema(db);
-    await seed(db);
     const body: any = await req.json();
-    let result;
-    if (body.action === 'staffLogin') result = await staffLogin(db, body);
-    else if (body.action === 'staffLogout')
-      result = await staffLogout(db, body);
-    else if (body.action === 'createOrder')
-      result = await createOrder(db, body);
-    else if (body.action === 'createInventoryItem')
-      result = await createInventoryItem(
-        db,
-        body,
-        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
-      );
-    else if (body.action === 'adjustInventory')
-      result = await adjustInventory(
-        db,
-        body,
-        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
-      );
-    else if (body.action === 'createPickWave')
-      result = await handleCreatePickWave(
-        db,
-        body,
-        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
-      );
-    else if (body.action === 'confirmPick')
-      result = await confirmPick(
-        db,
-        body,
-        await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
-      );
-    else if (body.action === 'reportMissing')
-      result = await reportMissing(
-        db,
-        body,
-        await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
-      );
-    else if (body.action === 'startTask')
-      result = await startTask(
-        db,
-        body,
-        await requireStaff(db, body, ['PICKER', 'WAREHOUSE_MANAGER']),
-      );
-    else if (body.action === 'transferInventory')
-      result = await transferInventory(
-        db,
-        body,
-        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
-      );
-    else if (body.action === 'simulateSurge')
-      result = await simulateSurge(
-        db,
-        await requireStaff(db, body, ['NETWORK_ADMIN']),
-      );
-    else throw new Error('Unsupported action.');
-    return Response.json({ ok: true, result, state: await state(db) });
+    return Response.json(await handleStockUpActionPayload(body));
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : 'Operation failed' },

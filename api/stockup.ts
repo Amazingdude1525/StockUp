@@ -1,29 +1,23 @@
-import { GET as getHandler, POST as postHandler } from '../app/api/stockup/route';
+import { getStockUpDataState, handleStockUpActionPayload } from '../app/api/stockup/route';
 
 export default async function handler(req: any, res: any) {
   try {
     if (req.method === 'GET') {
-      const response = await getHandler();
-      const data = await response.json();
-      return res.status(response.status).json(data);
+      const data = await getStockUpDataState();
+      return res.status(200).json(data);
     }
 
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-      const webReq = new Request(`https://${req.headers?.host || 'localhost'}${req.url || '/api/stockup'}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const response = await postHandler(webReq);
-      const data = await response.json();
-      return res.status(response.status).json(data);
+      const data = await handleStockUpActionPayload(body);
+      return res.status(200).json(data);
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
-  } catch (err) {
-    return res.status(500).json({
-      error: err instanceof Error ? err.message : 'Internal Server Error',
+  } catch (err: any) {
+    console.error('API StockUp Error:', err);
+    return res.status(400).json({
+      error: err?.message || 'Operation failed',
     });
   }
 }
