@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
-    "postbuild": "node -e \"require('fs').copyFileSync('index.html', 'dist/client/index.html')\"",
+    "postbuild": "node scripts/postbuild.js",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",
