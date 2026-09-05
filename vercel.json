@@ -3,16 +3,8 @@
   "outputDirectory": "dist/client",
   "rewrites": [
     {
-      "source": "/api/stockup",
-      "destination": "/api/stockup"
-    },
-    {
-      "source": "/api/razorpay",
-      "destination": "/api/razorpay"
-    },
-    {
-      "source": "/((?!_next/|_vinext/|stockup-|favicon|.*\\..*).*)",
-      "destination": "/api/index"
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
