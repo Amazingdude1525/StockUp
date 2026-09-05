@@ -32,6 +32,7 @@ import {
   ShoppingCart,
   Sparkles,
   UserRound,
+  UserCheck,
   X,
 } from 'lucide-react';
 import BrandLogo from '@/components/stockup/brand-logo';
@@ -1162,205 +1163,454 @@ function WarehouseView({
   onInventory: () => void;
   onPicks: () => void;
 }) {
-  const [zoom, setZoom] = useState(1),
-    [selected, setSelected] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'simulator' | 'map'>('simulator');
+
+  const employees = [
+    {
+      id: 'EMP1001',
+      name: 'Meera Singh',
+      role: 'Senior Picker',
+      warehouseCode: warehouse.code,
+      status: 'PICKING_ACTIVE',
+      taskCode: 'PT-4821',
+      orderCode: 'ORD-9821',
+      currentLocation: 'Row 2 · Bin R02-B04',
+      speed: '1.8 m/s',
+      eta: '42s',
+      totalDistance: task?.totalDistance ?? 184,
+      itemsPicked: '2 / 4 items',
+      avatarBg: 'bg-[#1262e3]',
+    },
+    {
+      id: 'EMP1042',
+      name: 'Ravi Kumar',
+      role: 'Speed Picker',
+      warehouseCode: warehouse.code,
+      status: 'EN_ROUTE',
+      taskCode: 'PT-4824',
+      orderCode: 'ORD-9824',
+      currentLocation: 'Row 3 · Bin R03-B02',
+      speed: '2.1 m/s',
+      eta: '18s',
+      totalDistance: 142,
+      itemsPicked: '1 / 3 items',
+      avatarBg: 'bg-[#10b981]',
+    },
+    {
+      id: 'EMP1077',
+      name: 'Nisha Verma',
+      role: 'Fulfillment Specialist',
+      warehouseCode: warehouse.code,
+      status: 'ASSIGNED',
+      taskCode: 'PT-4830',
+      orderCode: 'ORD-9830',
+      currentLocation: 'Check-In Station CP01',
+      speed: '1.5 m/s',
+      eta: '1m 10s',
+      totalDistance: 210,
+      itemsPicked: '0 / 5 items',
+      avatarBg: 'bg-[#f59e0b]',
+    },
+  ];
+
+  const [selectedEmpId, setSelectedEmpId] = useState<string>('EMP1001');
+  const selectedEmp = employees.find((e) => e.id === selectedEmpId) || employees[0];
+
   const bins = products.flatMap((p) =>
     p.locations
       .filter((l) => l.warehouseCode === warehouse.code)
       .map((l) => ({ ...l, product: p })),
   );
+
+  const activeRoute = task?.route ?? [
+    { x: 70, y: 526 },
+    { x: 120, y: 455 },
+    { x: 240, y: 455 },
+    { x: 240, y: 108 },
+    { x: 570, y: 108 },
+    { x: 570, y: 318 },
+    { x: 350, y: 318 },
+    { x: 350, y: 423 },
+    { x: 120, y: 455 },
+    { x: 70, y: 526 },
+  ];
+
+  const activeItems = task?.items ?? [
+    {
+      id: 'pi-1',
+      productName: 'Organic Almond Milk 1L',
+      locationCode: `${warehouse.code}-R01-B02`,
+      binCode: 'R01-B02',
+      quantity: 2,
+      barcode: '8901234567890',
+      status: 'PENDING',
+      x: 240,
+      y: 108,
+    },
+    {
+      id: 'pi-2',
+      productName: 'Single Origin Espresso Beans',
+      locationCode: `${warehouse.code}-R03-B05`,
+      binCode: 'R03-B05',
+      quantity: 1,
+      barcode: '8901234567891',
+      status: 'PENDING',
+      x: 570,
+      y: 318,
+    },
+    {
+      id: 'pi-3',
+      productName: 'Artisanal Dark Chocolate 70%',
+      locationCode: `${warehouse.code}-R04-B03`,
+      binCode: 'R04-B03',
+      quantity: 3,
+      barcode: '8901234567892',
+      status: 'PENDING',
+      x: 350,
+      y: 423,
+    },
+  ];
+
   return (
     <>
       <PageHead
         eyebrow={`${warehouse.code} · ${warehouse.status}`}
         title={warehouse.name}
-        sub={`${warehouse.city} · Check-in ${warehouse.checkinCode} · Graph-routed indoor navigation`}
+        sub={`${warehouse.city} · Check-in ${warehouse.checkinCode} · Graph-routed indoor navigation & live employee tracking`}
         action={
           <select
             value={warehouse.code}
             onChange={(e) => onChange(e.target.value)}
             className="h-10 rounded-lg border bg-white px-3 text-sm font-bold"
           >
-            <option>WH01</option>
-            <option>WH02</option>
-            <option>WH03</option>
+            <option value="WH01">WH01 (Northline)</option>
+            <option value="WH02">WH02 (BlueRoute)</option>
+            <option value="WH03">WH03 (Southgate)</option>
           </select>
         }
       />
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+
+      {/* Live Warehouse Staff & Active Pickers Banner */}
+      <div className="mb-6 rounded-2xl border border-[#cfe0f5] bg-gradient-to-r from-[#edf5ff] via-white to-[#f4f8ff] p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <div className="grid size-9 place-items-center rounded-xl bg-[#1262e3] text-white">
+              <UserCheck size={18} />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-[#12213f]">
+                👥 Live Warehouse Staff & Active Pickers ({warehouse.code})
+              </h3>
+              <p className="text-xs text-[#627287]">
+                Tap any employee below to track their live A* indoor GPS movement, ETA, and assigned picking route.
+              </p>
+            </div>
+          </div>
+          <span className="rounded-full bg-[#39ad68]/15 px-3 py-1 text-xs font-black text-[#227943] flex items-center gap-1.5">
+            <span className="relative flex size-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#39ad68] opacity-75"></span>
+              <span className="relative inline-flex rounded-full size-2 bg-[#39ad68]"></span>
+            </span>
+            3 Staff Active On-Floor
+          </span>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          {employees.map((emp) => {
+            const isSelected = emp.id === selectedEmpId;
+            return (
+              <div
+                key={emp.id}
+                onClick={() => {
+                  setSelectedEmpId(emp.id);
+                  setActiveTab('simulator');
+                }}
+                className={`cursor-pointer rounded-xl border p-4 transition-all ${
+                  isSelected
+                    ? 'border-[#1262e3] bg-white shadow-md ring-2 ring-[#1262e3]/20'
+                    : 'border-[#dce4ee] bg-white/70 hover:border-[#1262e3]/50 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`grid size-10 place-items-center rounded-full text-white font-black text-xs ${emp.avatarBg}`}>
+                      {emp.id === 'EMP1001' ? 'MS' : emp.id === 'EMP1042' ? 'RK' : 'NV'}
+                    </div>
+                    <div>
+                      <h4 className="font-black text-sm text-[#12213f]">{emp.name}</h4>
+                      <p className="text-[11px] font-bold text-[#6a798e]">{emp.role} · {emp.id}</p>
+                    </div>
+                  </div>
+                  {isSelected && (
+                    <span className="rounded-md bg-[#1262e3] px-2 py-0.5 text-[10px] font-black text-white">
+                      Tracking
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-[#edf2f7] space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-[#78879b]">Task:</span>
+                    <span className="font-mono font-bold text-[#1262e3]">{emp.taskCode} ({emp.orderCode})</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#78879b]">Current Position:</span>
+                    <span className="font-bold text-[#12213f]">{emp.currentLocation}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#78879b]">Live Speed / ETA:</span>
+                    <span className="font-bold text-[#23884e]">{emp.speed} · ETA {emp.eta}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <button
+                    className={`w-full py-1.5 rounded-lg text-xs font-black transition ${
+                      isSelected
+                        ? 'bg-[#1262e3] text-white'
+                        : 'bg-[#edf4ff] text-[#1262e3] hover:bg-[#1262e3] hover:text-white'
+                    }`}
+                  >
+                    {isSelected ? '🛰️ Viewing Live Route' : 'Tap to Track Route'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="overflow-hidden rounded-2xl border bg-[#eef3f7] shadow-sm">
           <div className="flex items-center justify-between border-b bg-white px-4 py-3">
             <div className="flex gap-2">
-              <span className="rounded-md bg-[#12213f] px-3 py-2 text-xs font-bold text-white">
-                Map
-              </span>
+              <button
+                onClick={() => setActiveTab('simulator')}
+                className={`rounded-lg px-3 py-2 text-xs font-black transition ${
+                  activeTab === 'simulator'
+                    ? 'bg-[#1262e3] text-white shadow-sm'
+                    : 'bg-[#f1f5f9] text-[#647187] hover:bg-[#e2e8f0]'
+                }`}
+              >
+                🛰️ Live GPS Route Simulator
+              </button>
+              <button
+                onClick={() => setActiveTab('map')}
+                className={`rounded-lg px-3 py-2 text-xs font-black transition ${
+                  activeTab === 'map'
+                    ? 'bg-[#12213f] text-white shadow-sm'
+                    : 'bg-[#f1f5f9] text-[#647187] hover:bg-[#e2e8f0]'
+                }`}
+              >
+                🗺️ Warehouse Grid Map
+              </button>
               <button
                 onClick={onInventory}
-                className="px-3 py-2 text-xs font-bold text-[#647187]"
+                className="px-3 py-2 text-xs font-bold text-[#647187] hover:text-[#12213f]"
               >
                 Inventory
               </button>
               <button
                 onClick={onPicks}
-                className="px-3 py-2 text-xs font-bold text-[#647187]"
+                className="px-3 py-2 text-xs font-bold text-[#647187] hover:text-[#12213f]"
               >
                 Active picks
               </button>
             </div>
-            <div className="flex overflow-hidden rounded-lg border">
-              <button
-                aria-label="Adjust warehouse map zoom"
-                onClick={() => setZoom((z) => Math.min(1.6, z + 0.15))}
-                className="grid size-9 place-items-center border-r bg-white"
-              >
-                <Plus size={16} />
-              </button>
-              <button
-                aria-label="Adjust warehouse map zoom"
-                onClick={() => setZoom((z) => Math.max(0.75, z - 0.15))}
-                className="grid size-9 place-items-center border-r bg-white"
-              >
-                <Minus size={16} />
-              </button>
-              <button
-                aria-label="Adjust warehouse map zoom"
-                onClick={() => setZoom(1)}
-                className="grid size-9 place-items-center bg-white"
-              >
-                <Crosshair size={16} />
-              </button>
-            </div>
-          </div>
-          <div className="warehouse-canvas">
-            <svg
-              viewBox="0 0 820 620"
-              className="h-full w-full"
-              style={{ transform: `scale(${zoom})` }}
-            >
-              <rect
-                x="24"
-                y="22"
-                width="772"
-                height="572"
-                rx="18"
-                fill="#f7fafc"
-                stroke="#aebbc9"
-                strokeWidth="3"
-              />
-              <rect
-                x="45"
-                y="485"
-                width="160"
-                height="82"
-                rx="12"
-                fill="#e0f2fe"
-                stroke="#0284c7"
-                strokeWidth="2.5"
-              />
-              <g>
-                <circle
-                  cx="70"
-                  cy="526"
-                  r="13"
-                  fill="#0f172a"
-                  stroke="white"
-                  strokeWidth="3.5"
-                />
-                <circle cx="70" cy="526" r="4" fill="#38bdf8" />
-              </g>
-              <text x="96" y="522" textAnchor="start" className="map-label" fontWeight="900" fill="#0f172a">
-                CHECK-IN
-              </text>
-              <text x="96" y="542" textAnchor="start" className="map-small" fontWeight="700" fill="#475569">
-                {warehouse.checkinCode}
-              </text>
-              {[80, 185, 290, 395].map((y, r) => (
-                <g key={y}>
-                  <rect
-                    x="115"
-                    y={y}
-                    width="595"
-                    height="52"
-                    rx="5"
-                    fill="#263956"
-                  />
-                  <text
-                    x="82"
-                    y={y + 31}
-                    textAnchor="middle"
-                    className="row-label"
-                  >
-                    R0{r + 1}
-                  </text>
-                  {[130, 240, 350, 460, 570, 680].map((x, b) => (
-                    <rect
-                      key={x}
-                      x={x}
-                      y={y + 7}
-                      width="70"
-                      height="38"
-                      rx="3"
-                      fill="#405472"
-                      stroke="#627795"
-                    />
-                  ))}
-                </g>
-              ))}
-              <path
-                d="M120 485 L120 455 L745 455 L745 350 L85 350 L85 245 L745 245 L745 140 L85 140"
-                fill="none"
-                stroke="#cbd7e2"
-                strokeWidth="5"
-                strokeDasharray="4 8"
-              />
-              {task && (
-                <polyline
-                  points={task.route.map((p) => `${p.x},${p.y}`).join(' ')}
-                  fill="none"
-                  stroke="#1473e6"
-                  strokeWidth="7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              )}
 
-              {bins.map((b, i) => (
-                <g
-                  key={b.inventoryId}
-                  onClick={() => setSelected(b.inventoryId)}
-                  className="cursor-pointer"
+            {activeTab === 'map' && (
+              <div className="flex overflow-hidden rounded-lg border">
+                <button
+                  aria-label="Adjust warehouse map zoom"
+                  onClick={() => setZoom((z) => Math.min(1.6, z + 0.15))}
+                  className="grid size-9 place-items-center border-r bg-white"
                 >
-                  <circle
-                    cx={b.x + 37}
-                    cy={b.y + 21}
-                    r={selected === b.inventoryId ? 15 : 10}
-                    fill={
-                      b.available <= 10 ? '#ef4444' : i < 3 ? '#7ed957' : '#fff'
-                    }
-                    stroke={selected === b.inventoryId ? '#1262e3' : '#12213f'}
-                    strokeWidth={selected === b.inventoryId ? 5 : 3}
-                  />
-                </g>
-              ))}
-            </svg>
+                  <Plus size={16} />
+                </button>
+                <button
+                  aria-label="Adjust warehouse map zoom"
+                  onClick={() => setZoom((z) => Math.max(0.75, z - 0.15))}
+                  className="grid size-9 place-items-center border-r bg-white"
+                >
+                  <Minus size={16} />
+                </button>
+                <button
+                  aria-label="Adjust warehouse map zoom"
+                  onClick={() => setZoom(1)}
+                  className="grid size-9 place-items-center bg-white"
+                >
+                  <Crosshair size={16} />
+                </button>
+              </div>
+            )}
           </div>
+
+          {activeTab === 'simulator' ? (
+            <div className="p-3 bg-[#0b162c]">
+              <PickRouteSimulator
+                route={activeRoute}
+                items={activeItems}
+                totalDistance={selectedEmp.totalDistance}
+                checkinCode={warehouse.checkinCode}
+                zoom={1}
+                onBinSelect={(binId) => setSelected(binId)}
+              />
+            </div>
+          ) : (
+            <div className="warehouse-canvas">
+              <svg
+                viewBox="0 0 820 620"
+                className="h-full w-full"
+                style={{ transform: `scale(${zoom})` }}
+              >
+                <rect
+                  x="24"
+                  y="22"
+                  width="772"
+                  height="572"
+                  rx="18"
+                  fill="#f7fafc"
+                  stroke="#aebbc9"
+                  strokeWidth="3"
+                />
+                <rect
+                  x="45"
+                  y="485"
+                  width="160"
+                  height="82"
+                  rx="12"
+                  fill="#e0f2fe"
+                  stroke="#0284c7"
+                  strokeWidth="2.5"
+                />
+                <g>
+                  <circle
+                    cx="70"
+                    cy="526"
+                    r="13"
+                    fill="#0f172a"
+                    stroke="white"
+                    strokeWidth="3.5"
+                  />
+                  <circle cx="70" cy="526" r="4" fill="#38bdf8" />
+                </g>
+                <text x="96" y="522" textAnchor="start" className="map-label" fontWeight="900" fill="#0f172a">
+                  CHECK-IN
+                </text>
+                <text x="96" y="542" textAnchor="start" className="map-small" fontWeight="700" fill="#475569">
+                  {warehouse.checkinCode}
+                </text>
+                {[80, 185, 290, 395].map((y, r) => (
+                  <g key={y}>
+                    <rect
+                      x="115"
+                      y={y}
+                      width="595"
+                      height="52"
+                      rx="5"
+                      fill="#263956"
+                    />
+                    <text
+                      x="82"
+                      y={y + 31}
+                      textAnchor="middle"
+                      className="row-label"
+                    >
+                      R0{r + 1}
+                    </text>
+                    {[130, 240, 350, 460, 570, 680].map((x, b) => (
+                      <rect
+                        key={x}
+                        x={x}
+                        y={y + 7}
+                        width="70"
+                        height="38"
+                        rx="3"
+                        fill="#405472"
+                        stroke="#627795"
+                      />
+                    ))}
+                  </g>
+                ))}
+                <path
+                  d="M120 485 L120 455 L745 455 L745 350 L85 350 L85 245 L745 245 L745 140 L85 140"
+                  fill="none"
+                  stroke="#cbd7e2"
+                  strokeWidth="5"
+                  strokeDasharray="4 8"
+                />
+                {task && (
+                  <polyline
+                    points={task.route.map((p) => `${p.x},${p.y}`).join(' ')}
+                    fill="none"
+                    stroke="#1473e6"
+                    strokeWidth="7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+
+                {bins.map((b, i) => (
+                  <g
+                    key={b.inventoryId}
+                    onClick={() => setSelected(b.inventoryId)}
+                    className="cursor-pointer"
+                  >
+                    <circle
+                      cx={b.x + 37}
+                      cy={b.y + 21}
+                      r={selected === b.inventoryId ? 15 : 10}
+                      fill={
+                        b.available <= 10 ? '#ef4444' : i < 3 ? '#7ed957' : '#fff'
+                      }
+                      stroke={selected === b.inventoryId ? '#1262e3' : '#12213f'}
+                      strokeWidth={selected === b.inventoryId ? 5 : 3}
+                    />
+                  </g>
+                ))}
+              </svg>
+            </div>
+          )}
         </div>
+
         <aside className="space-y-4">
-          <div className="rounded-2xl bg-[#12213f] p-5 text-white">
-            <p className="text-xs font-bold uppercase tracking-[.13em] text-[#9fb1cb]">
-              Route performance
-            </p>
-            <p className="mt-2 text-3xl font-black">
-              {Math.round(task?.totalDistance ?? 184)} m
-            </p>
-            <p className="text-sm text-[#b9c8dc]">
-              {task?.items.length ?? 0} pick stops · A* + 2-opt
-            </p>
-            <div className="mt-4 rounded-lg bg-white/10 p-3 text-sm">
-              <span className="font-bold text-[#a8ee80]">Graph-safe route</span>{' '}
-              follows walkable corridors only
+          <div className="rounded-2xl bg-[#12213f] p-5 text-white shadow-md">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-[.13em] text-[#9fb1cb]">
+                Tracked Employee Live Route
+              </p>
+              <span className="rounded bg-[#7ed957] px-2 py-0.5 text-[10px] font-black text-[#12213f]">
+                {selectedEmp.id}
+              </span>
+            </div>
+            <h3 className="mt-2 text-xl font-black">{selectedEmp.name}</h3>
+            <p className="text-xs text-[#b9c8dc] mt-0.5">{selectedEmp.role} · {selectedEmp.taskCode}</p>
+
+            <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] uppercase font-bold text-[#8fa7c7]">A* Distance</p>
+                <p className="text-2xl font-black text-white">{selectedEmp.totalDistance} m</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-[#8fa7c7]">Live Speed</p>
+                <p className="text-2xl font-black text-[#7ed957]">{selectedEmp.speed}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-lg bg-white/10 p-3 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-[#a5b8d4]">Estimated Arrival:</span>
+                <span className="font-bold text-[#7ed957]">{selectedEmp.eta}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#a5b8d4]">Current Target:</span>
+                <span className="font-bold text-white">{selectedEmp.currentLocation}</span>
+              </div>
             </div>
           </div>
+
           {selected ? (
             <BinCard bin={bins.find((b) => b.inventoryId === selected)!} />
           ) : (
@@ -1368,11 +1618,11 @@ function WarehouseView({
               <MapPin className="mb-3 text-[#1262e3]" />
               <h3 className="font-black">Select a bin</h3>
               <p className="mt-1 text-sm text-[#69768a]">
-                Click any inventory marker to inspect exact stock and
-                utilization.
+                Click any inventory marker on map or route stop to inspect exact stock and utilization.
               </p>
             </div>
           )}
+
           <div className="rounded-2xl border bg-white p-5">
             <p className="text-xs font-bold uppercase text-[#8994a5]">
               Operational state
