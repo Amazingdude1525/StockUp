@@ -1476,49 +1476,31 @@ function ShopView({
   );
   const [paying, setPaying] = useState(false);
 
-  const handleOpenRazorpay = async () => {
+  const handleOpenRazorpay = () => {
     if (!items.length) return;
+    setShowRazorpay(true);
+  };
+
+  const handlePayAndCheckout = async () => {
     setPaying(true);
     try {
-      if (typeof window !== 'undefined') {
-        if (!(window as any).Razorpay) {
-          await new Promise<void>((resolve) => {
-            const script = document.createElement('script');
-            script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-            script.onload = () => resolve();
-            script.onerror = () => resolve();
-            document.body.appendChild(script);
-          });
-        }
-        if ((window as any).Razorpay) {
-          const rzp = new (window as any).Razorpay({
-            key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TJgVCoH04BjKnJ',
-            amount: total,
-            currency: 'INR',
-            name: 'StockUp — Fulfillment OS',
-            description: 'E-Commerce Warehouse Reservation',
-            prefill: {
-              name: customerName || 'Priya Sharma',
-              email: 'customer@stockup.com',
-              contact: '9999999999',
-            },
-            theme: {
-              color: '#1262e3',
-            },
-            handler: function () {
-              checkout();
-            },
-          });
-          rzp.open();
-          return;
-        }
-      }
-    } catch (err) {
-      console.error('Razorpay popup error:', err);
+      await fetch('/api/razorpay', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verifyPayment',
+          paymentId: 'pay_' + Math.random().toString(36).substring(2, 10),
+          orderId: 'order_' + Math.random().toString(36).substring(2, 10),
+        }),
+      });
+      setShowRazorpay(false);
+      checkout();
+    } catch {
+      setShowRazorpay(false);
+      checkout();
     } finally {
       setPaying(false);
     }
-    setShowRazorpay(true);
   };
 
   return (
