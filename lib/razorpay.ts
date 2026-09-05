@@ -12,7 +12,7 @@ export type RazorpayPaymentResponse = {
 };
 
 export function getRazorpayKeyId(): string {
-  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_stockup2026';
+  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TJgVCoH04BjKnJ';
 }
 
 export function createTestPaymentId(): string {

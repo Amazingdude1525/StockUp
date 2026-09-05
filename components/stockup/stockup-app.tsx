@@ -1470,24 +1470,49 @@ function ShopView({
   );
   const [paying, setPaying] = useState(false);
 
-  const handlePayAndCheckout = async () => {
+  const handleOpenRazorpay = async () => {
+    if (!items.length) return;
     setPaying(true);
     try {
-      await fetch('/api/razorpay', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          action: 'verifyPayment',
-          paymentId: 'pay_' + Math.random().toString(36).substring(2, 10),
-          orderId: 'order_' + Math.random().toString(36).substring(2, 10),
-        }),
-      });
-      setShowRazorpay(false);
-      checkout();
-    } catch {
+      if (typeof window !== 'undefined') {
+        if (!(window as any).Razorpay) {
+          await new Promise<void>((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+            script.onload = () => resolve();
+            script.onerror = () => resolve();
+            document.body.appendChild(script);
+          });
+        }
+        if ((window as any).Razorpay) {
+          const rzp = new (window as any).Razorpay({
+            key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TJgVCoH04BjKnJ',
+            amount: total,
+            currency: 'INR',
+            name: 'StockUp — Fulfillment OS',
+            description: 'E-Commerce Warehouse Reservation',
+            prefill: {
+              name: customerName || 'Priya Sharma',
+              email: 'customer@stockup.com',
+              contact: '9999999999',
+            },
+            theme: {
+              color: '#1262e3',
+            },
+            handler: function () {
+              checkout();
+            },
+          });
+          rzp.open();
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('Razorpay popup error:', err);
     } finally {
       setPaying(false);
     }
+    setShowRazorpay(true);
   };
 
   return (
@@ -1587,11 +1612,12 @@ function ShopView({
             <span>{money(total)}</span>
           </div>
           <button
-            disabled={!items.length || busy}
-            onClick={() => setShowRazorpay(true)}
+            disabled={!items.length || busy || paying}
+            onClick={() => void handleOpenRazorpay()}
             className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#1262e3] font-black text-white disabled:opacity-40"
           >
-            Pay with Razorpay <ChevronRight size={17} />
+            {paying ? <LoaderCircle className="animate-spin" size={18} /> : <ChevronRight size={17} />}
+            Pay with Razorpay
           </button>
           <p className="mt-3 text-center text-xs text-[#7b8798]">
             Razorpay Test Mode · Transactional reservation
