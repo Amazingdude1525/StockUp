@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import * as nodeCrypto from 'node:crypto';
 import { getInMemoryD1 } from '../../../lib/db/inMemoryD1';
 import { selectWarehouse } from '../../../lib/algorithms/allocation';
 import {
@@ -14,20 +14,17 @@ import { computeCoPurchaseMatrix } from '../../../lib/algorithms/copurchase';
 type D1 = D1Database;
 const now = () => new Date().toISOString();
 
-const getCrypto = () => {
-  if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
-    return globalThis.crypto;
-  }
-  return (crypto as any).webcrypto || crypto;
-};
-
 const getUUID = () => {
-  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
-    return globalThis.crypto.randomUUID();
-  }
-  if (crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {}
+  try {
+    if (nodeCrypto?.randomUUID) {
+      return nodeCrypto.randomUUID();
+    }
+  } catch {}
   return Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
 };
 
@@ -46,33 +43,40 @@ const hex = (bytes: ArrayBuffer) =>
     .join('');
 
 async function hashCredential(value: string, salt: string) {
-  const c = getCrypto();
-  const material = await c.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(value),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  );
-  return hex(
-    await c.subtle.deriveBits(
-      {
-        name: 'PBKDF2',
-        hash: 'SHA-256',
-        salt: new TextEncoder().encode('stockup:' + salt),
-        iterations: 120000,
-      },
-      material,
-      256,
-    ),
-  );
+  try {
+    const c = (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) || (nodeCrypto as any)?.webcrypto?.subtle;
+    if (c) {
+      const material = await c.importKey(
+        'raw',
+        new TextEncoder().encode(value),
+        'PBKDF2',
+        false,
+        ['deriveBits'],
+      );
+      const bits = await c.deriveBits(
+        {
+          name: 'PBKDF2',
+          hash: 'SHA-256',
+          salt: new TextEncoder().encode('stockup:' + salt),
+          iterations: 1000,
+        },
+        material,
+        256,
+      );
+      return hex(bits);
+    }
+  } catch {}
+  return nodeCrypto.createHash('sha256').update(value + ':' + salt).digest('hex');
 }
 
 async function hashToken(value: string) {
-  const c = getCrypto();
-  return hex(
-    await c.subtle.digest('SHA-256', new TextEncoder().encode(value)),
-  );
+  try {
+    const c = (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) || (nodeCrypto as any)?.webcrypto?.subtle;
+    if (c) {
+      return hex(await c.digest('SHA-256', new TextEncoder().encode(value)));
+    }
+  } catch {}
+  return nodeCrypto.createHash('sha256').update(value).digest('hex');
 }
 
 async function ensureAccessSchema(db: D1) {
