@@ -138,43 +138,6 @@ export default function StockUpApp() {
     localStorage.setItem('stockup-staff-sessions', JSON.stringify(sessions));
   }, [sessions]);
 
-  useEffect(() => {
-    const context = (
-      document as Document & {
-        modelContext?: {
-          registerTool: (tool: unknown, options?: unknown) => unknown;
-        };
-      }
-    ).modelContext;
-    if (!context?.registerTool) return;
-    const controller = new AbortController();
-    void Promise.resolve(
-      context.registerTool(
-        {
-          name: 'search_stockup_inventory',
-          title: 'Search StockUp inventory',
-          description:
-            'Search product, SKU, barcode, or physical warehouse location and show matching live inventory.',
-          inputSchema: {
-            type: 'object',
-            properties: { query: { type: 'string' } },
-            required: ['query'],
-            additionalProperties: false,
-          },
-          annotations: { readOnlyHint: true, untrustedContentHint: false },
-          execute: (input: unknown) => {
-            setQuery(String((input as { query: string }).query || ''));
-            setPanel('admin');
-            setView('inventory');
-            return { visiblePanel: 'admin', visibleView: 'inventory' };
-          },
-        },
-        { signal: controller.signal },
-      ),
-    ).catch(() => {});
-    return () => controller.abort();
-  }, []);
-
   const act = async (
     payload: Record<string, unknown>,
     sessionToken?: string,
