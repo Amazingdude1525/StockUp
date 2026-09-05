@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { getInMemoryD1 } from '../../../lib/db/inMemoryD1';
 import { selectWarehouse } from '../../../lib/algorithms/allocation';
 import {
@@ -12,7 +13,25 @@ import { computeCoPurchaseMatrix } from '../../../lib/algorithms/copurchase';
 
 type D1 = D1Database;
 const now = () => new Date().toISOString();
-const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+const getCrypto = () => {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+    return globalThis.crypto;
+  }
+  return (crypto as any).webcrypto || crypto;
+};
+
+const getUUID = () => {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  if (crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+};
+
+const id = (prefix: string) => `${prefix}-${getUUID()}`;
 
 type StaffIdentity = {
   staffCode: string;
@@ -27,7 +46,8 @@ const hex = (bytes: ArrayBuffer) =>
     .join('');
 
 async function hashCredential(value: string, salt: string) {
-  const material = await crypto.subtle.importKey(
+  const c = getCrypto();
+  const material = await c.subtle.importKey(
     'raw',
     new TextEncoder().encode(value),
     'PBKDF2',
@@ -35,7 +55,7 @@ async function hashCredential(value: string, salt: string) {
     ['deriveBits'],
   );
   return hex(
-    await crypto.subtle.deriveBits(
+    await c.subtle.deriveBits(
       {
         name: 'PBKDF2',
         hash: 'SHA-256',
@@ -49,8 +69,9 @@ async function hashCredential(value: string, salt: string) {
 }
 
 async function hashToken(value: string) {
+  const c = getCrypto();
   return hex(
-    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
+    await c.subtle.digest('SHA-256', new TextEncoder().encode(value)),
   );
 }
 
