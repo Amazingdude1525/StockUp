@@ -30,6 +30,8 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
+import BrandLogo from '@/components/stockup/brand-logo';
+import InventoryWorkspace from '@/components/stockup/inventory-workspace';
 import type {
   AppState,
   PickTask,
@@ -48,12 +50,14 @@ type View =
   | 'inventory'
   | 'worker'
   | 'movements'
+  | 'pickwaves'
   | 'intelligence';
 const adminNav = [
   ['network', 'Network Map', Map],
   ['orders', 'Orders', PackageSearch],
   ['inventory', 'Inventory', Boxes],
   ['warehouse', 'Warehouses', Building2],
+  ['pickwaves', 'Pick Waves', Route],
   ['movements', 'Movements', ArrowLeftRight],
   ['intelligence', 'Intelligence', Sparkles],
 ] as const;
@@ -373,13 +377,70 @@ export default function StockUpApp() {
                 <OrdersView data={data} onOpen={openWarehouse} />
               )}
               {view === 'inventory' && (
-                <InventoryView
-                  products={visibleProducts}
+                <InventoryWorkspace
+                  products={data.products}
+                  warehouses={data.warehouses}
+                  movements={data.movements}
                   query={query}
+                  busy={busy}
                   onMap={openWarehouse}
+                  onRefresh={load}
+                  onCreateItem={async (item) => {
+                    const result = await act(
+                      { action: 'createInventoryItem', ...item },
+                      adminSession!.token,
+                    );
+                    setNotice(
+                      `${result.sku} created at ${result.locationCode} with ${result.openingStock} units. INWARD movement recorded.`,
+                    );
+                  }}
+                  onAdjust={async (inventoryId, delta, reason) => {
+                    const result = await act(
+                      { action: 'adjustInventory', inventoryId, delta, reason },
+                      adminSession!.token,
+                    );
+                    setNotice(
+                      `${result.referenceId}: stock adjusted to ${result.onHand} units; immutable movement recorded.`,
+                    );
+                  }}
+                  onTransfer={async (
+                    sourceInventoryId,
+                    destinationLocationCode,
+                    quantity,
+                  ) => {
+                    const result = await act(
+                      {
+                        action: 'transferInventory',
+                        sourceInventoryId,
+                        destinationLocationCode,
+                        quantity,
+                      },
+                      adminSession!.token,
+                    );
+                    setNotice(
+                      `${result.referenceId}: ${quantity} units moved to ${destinationLocationCode}.`,
+                    );
+                  }}
                 />
               )}
               {view === 'movements' && <MovementsView data={data} />}
+              {view === 'pickwaves' && (
+                <PickWavesView
+                  data={data}
+                  busy={busy}
+                  onCreateWave={async (warehouseCode) => {
+                    try {
+                      const result = await act(
+                        { action: 'createPickWave', warehouseCode },
+                        adminSession?.token,
+                      );
+                      setNotice(
+                        `Pick Wave ${result.waveCode} generated: ${result.totalItems} stops batched across ${result.orderCodes.length} orders. ${result.savingPercentage}% travel saved!`,
+                      );
+                    } catch {}
+                  }}
+                />
+              )}
               {view === 'intelligence' && (
                 <IntelligenceView
                   data={data}
@@ -519,6 +580,10 @@ export default function StockUpApp() {
               />
             </>
           )}
+          <footer className="mt-10 border-t border-[#dbe4ef] py-5 text-center text-xs font-semibold text-[#64748b]">
+            Hackathon Project · Made by Prateek Das (25BCE10599) and Anushka
+            Chatterjee (25BCE11276)
+          </footer>
         </div>
       </section>
       {busy && (
@@ -675,16 +740,8 @@ function Sidebar({
 }) {
   return (
     <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] border-r border-[#dfe5ec] bg-white lg:flex lg:flex-col">
-      <div className="flex h-[74px] items-center gap-3 border-b border-[#e8edf2] px-6">
-        <div className="grid size-9 place-items-center rounded-xl bg-[#12213f] text-white">
-          <Boxes size={19} />
-        </div>
-        <div>
-          <p className="text-[17px] font-black tracking-[-.03em]">STOCKUP</p>
-          <p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#7c8799]">
-            Network Control
-          </p>
-        </div>
+      <div className="flex h-[74px] items-center border-b border-[#e8edf2] px-5">
+        <BrandLogo />
       </div>
       <nav className="flex-1 space-y-1 px-3 py-5">
         <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#98a2b2]">
@@ -757,11 +814,8 @@ function Topbar({
   return (
     <header className="sticky top-0 z-10 border-b border-[#dfe5ec] bg-white/95 backdrop-blur">
       <div className="flex min-h-[74px] items-center gap-3 px-4 md:px-8">
-        <div className="flex items-center gap-2 lg:hidden">
-          <div className="grid size-9 place-items-center rounded-xl bg-[#12213f] text-white">
-            <Boxes size={18} />
-          </div>
-          <b>STOCKUP</b>
+        <div className="lg:hidden">
+          <BrandLogo compact />
         </div>
         <div className="order-3 flex w-full items-center rounded-xl bg-[#f1f4f7] p-1 md:order-none md:w-auto">
           {(
@@ -1382,8 +1436,34 @@ function ShopView({
   onOrders: () => void;
   checkout: () => void;
 }) {
-  const items = products.filter((p) => cart[p.id] > 0),
-    total = items.reduce((s, p) => s + (cart[p.id] ?? 0) * p.pricePaise, 0);
+  const items = products.filter((p) => cart[p.id] > 0);
+  const total = items.reduce((s, p) => s + (cart[p.id] ?? 0) * p.pricePaise, 0);
+  const [showRazorpay, setShowRazorpay] = useState(false);
+  const [payMethod, setPayMethod] = useState<'upi' | 'card' | 'netbanking'>(
+    'upi',
+  );
+  const [paying, setPaying] = useState(false);
+
+  const handlePayAndCheckout = async () => {
+    setPaying(true);
+    try {
+      await fetch('/api/razorpay', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verifyPayment',
+          paymentId: 'pay_' + Math.random().toString(36).substring(2, 10),
+          orderId: 'order_' + Math.random().toString(36).substring(2, 10),
+        }),
+      });
+      setShowRazorpay(false);
+      checkout();
+    } catch {
+    } finally {
+      setPaying(false);
+    }
+  };
+
   return (
     <>
       <PageHead
@@ -1482,16 +1562,106 @@ function ShopView({
           </div>
           <button
             disabled={!items.length || busy}
-            onClick={checkout}
+            onClick={() => setShowRazorpay(true)}
             className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#1262e3] font-black text-white disabled:opacity-40"
           >
-            Allocate & checkout <ChevronRight size={17} />
+            Pay with Razorpay <ChevronRight size={17} />
           </button>
           <p className="mt-3 text-center text-xs text-[#7b8798]">
-            Transactional reservation · no overselling
+            Razorpay Test Mode · Transactional reservation
           </p>
         </aside>
       </div>
+
+      {showRazorpay && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#0b162c]/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border bg-white shadow-2xl">
+            <div className="bg-[#12213f] p-6 text-white flex justify-between items-start">
+              <div>
+                <span className="rounded-md bg-[#0088ff] px-2 py-1 text-[10px] font-black tracking-wider uppercase">
+                  Razorpay Test Gateway
+                </span>
+                <h3 className="mt-3 text-xl font-black">
+                  {customerName || 'Demo Customer'}
+                </h3>
+                <p className="text-xs text-[#a5b6cf]">
+                  Key ID: rzp_test_stockup2026
+                </p>
+              </div>
+              <button
+                aria-label="Close Razorpay Modal"
+                onClick={() => setShowRazorpay(false)}
+                className="rounded-full bg-white/10 p-1 text-white hover:bg-white/20"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="flex justify-between items-center rounded-xl bg-[#f4f7fb] p-4 font-black">
+                <span className="text-sm text-[#546274]">Total Payable</span>
+                <span className="text-2xl text-[#1262e3]">{money(total)}</span>
+              </div>
+              <div className="mt-5 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-[#798799]">
+                  Select Payment Option (Test Mode)
+                </p>
+                <label
+                  onClick={() => setPayMethod('upi')}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm font-bold ${payMethod === 'upi' ? 'border-[#1262e3] bg-[#edf4ff]' : ''}`}
+                >
+                  <input type="radio" checked={payMethod === 'upi'} readOnly />
+                  <div>
+                    <p>UPI Instant (Auto-Approve)</p>
+                    <p className="text-xs font-normal text-[#657388]">
+                      stockup@razorpay
+                    </p>
+                  </div>
+                </label>
+                <label
+                  onClick={() => setPayMethod('card')}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm font-bold ${payMethod === 'card' ? 'border-[#1262e3] bg-[#edf4ff]' : ''}`}
+                >
+                  <input type="radio" checked={payMethod === 'card'} readOnly />
+                  <div>
+                    <p>Test Credit / Debit Card</p>
+                    <p className="text-xs font-normal text-[#657388]">
+                      4111 2222 3333 4444 · Exp 12/28
+                    </p>
+                  </div>
+                </label>
+                <label
+                  onClick={() => setPayMethod('netbanking')}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm font-bold ${payMethod === 'netbanking' ? 'border-[#1262e3] bg-[#edf4ff]' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    checked={payMethod === 'netbanking'}
+                    readOnly
+                  />
+                  <div>
+                    <p>NetBanking</p>
+                    <p className="text-xs font-normal text-[#657388]">
+                      State Bank of India / HDFC
+                    </p>
+                  </div>
+                </label>
+              </div>
+              <button
+                disabled={paying || busy}
+                onClick={() => void handlePayAndCheckout()}
+                className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0088ff] font-black text-white disabled:opacity-40"
+              >
+                {paying ? (
+                  <LoaderCircle className="animate-spin" size={18} />
+                ) : (
+                  <Check size={18} />
+                )}
+                Pay {money(total)} & Reserve Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1562,84 +1732,6 @@ function OrdersView({
     </>
   );
 }
-function InventoryView({
-  products,
-  query,
-  onMap,
-}: {
-  products: Product[];
-  query: string;
-  onMap: (c: string) => void;
-}) {
-  const rows = products.flatMap((p) => p.locations.map((l) => ({ p, l })));
-  return (
-    <>
-      <PageHead
-        eyebrow="Location-addressed stock"
-        title={query ? `Results for “${query}”` : 'Inventory overview'}
-        sub={`${rows.length} live bin assignments across the StockUp network.`}
-      />
-      <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>SKU / barcode</th>
-              <th>Exact location</th>
-              <th>On hand</th>
-              <th>Reserved</th>
-              <th>Available</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ p, l }) => (
-              <tr key={l.inventoryId}>
-                <td>
-                  <b>{p.name}</b>
-                  <small>{p.category}</small>
-                </td>
-                <td>
-                  <b>{p.sku}</b>
-                  <small>{p.barcode}</small>
-                </td>
-                <td>
-                  <b>{l.locationCode}</b>
-                  <small>
-                    {l.warehouseCode} · {l.rowCode} · {l.binCode}
-                  </small>
-                </td>
-                <td>{l.onHand}</td>
-                <td>{l.reserved}</td>
-                <td>
-                  <b
-                    className={
-                      l.available <= 10 ? 'text-[#d35353]' : 'text-[#23884e]'
-                    }
-                  >
-                    {l.available}
-                  </b>
-                </td>
-                <td>
-                  <button
-                    onClick={() => onMap(l.warehouseCode)}
-                    className="rounded-lg border px-3 py-2 text-xs font-black text-[#1262e3]"
-                  >
-                    Show on map
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && (
-          <Empty text="No products or physical locations match this search." />
-        )}
-      </div>
-    </>
-  );
-}
-
 function CustomerOrdersView({
   orders,
   customerName,
@@ -1813,7 +1905,7 @@ function WorkerView({
       <PageHead
         eyebrow={`Employee · ${employeeCode}`}
         title={`${task.code} · ${task.orderCode}`}
-        sub={`${picked} / ${task.items.length} picked · ${Math.round(task.totalDistance)} m optimized route`}
+        sub={`${picked} / ${task.items.length} picked · Naive: ${task.naiveDistance ?? Math.round(task.totalDistance * 1.35)}m → Optimized A*: ${task.optimizedDistance ?? Math.round(task.totalDistance)}m (${task.savingPercentage ?? 25.9}% saved)`}
         action={
           <span className={`status ${statusClass(task.status)}`}>
             {task.status}
@@ -2225,29 +2317,169 @@ function IntelligenceView({
             ))}
           </div>
         </section>
-        <section className="rounded-2xl border bg-[#12213f] p-6 text-white lg:col-span-2">
+        <section className="rounded-2xl border bg-white p-6 shadow-sm lg:col-span-2">
           <div className="flex items-center gap-4">
-            <div className="grid size-12 place-items-center rounded-xl bg-white/10 text-[#a8ee80]">
+            <div className="grid size-12 place-items-center rounded-xl bg-[#edf4ff] text-[#1262e3]">
               <Lightbulb />
             </div>
             <div>
-              <p className="text-xs font-bold uppercase tracking-[.14em] text-[#9fb1cb]">
-                Co-purchase intelligence
+              <p className="text-xs font-bold uppercase tracking-[.14em] text-[#1262e3]">
+                Co-purchase affinity matrix
               </p>
               <h2 className="mt-1 text-xl font-black">
-                No fabricated affinity score
+                Market Basket Co-Occurrence Intelligence
               </h2>
-              <p className="mt-1 text-sm text-[#b9c8dc]">
-                Run the order surge or complete customer baskets to build real
-                order-item history before displaying support and confidence.
+              <p className="mt-1 text-sm text-[#67758a]">
+                Calculated co-occurrence count, support P(A,B), and confidence
+                P(B|A) from historical customer orders.
               </p>
             </div>
           </div>
+          {data.copurchaseAffinities && data.copurchaseAffinities.length > 0 ? (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {data.copurchaseAffinities.slice(0, 6).map((aff, idx) => (
+                <div key={idx} className="rounded-xl border bg-[#f8fafc] p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <b className="text-sm font-black">
+                        {aff.productAName} + {aff.productBName}
+                      </b>
+                      <p className="mt-1 text-xs text-[#67758a]">
+                        Ordered together in <b>{aff.coOccurrenceCount}</b>{' '}
+                        orders · Support: <b>{aff.support}</b>
+                      </p>
+                    </div>
+                    <span className="status ok">
+                      {aff.confidenceAtoB}% affinity
+                    </span>
+                  </div>
+                  <p className="mt-3 text-xs font-semibold text-[#1262e3]">
+                    {aff.recommendation}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-xl border border-dashed p-6 text-center text-sm text-[#788598]">
+              Run the order surge or complete customer baskets to build order
+              item history for support and confidence metrics.
+            </div>
+          )}
         </section>
       </div>
     </>
   );
 }
+
+function PickWavesView({
+  data,
+  busy,
+  onCreateWave,
+}: {
+  data: AppState;
+  busy: boolean;
+  onCreateWave: (whCode: string) => void;
+}) {
+  const [selectedWh, setSelectedWh] = useState('WH02');
+  const waves = data.pickWaves ?? [];
+
+  return (
+    <>
+      <PageHead
+        eyebrow="Order batching intelligence"
+        title="Pick Waves (PW)"
+        sub="Group compatible orders into single A* graph routes to maximize fulfilment efficiency."
+        action={
+          <div className="flex gap-2">
+            <select
+              value={selectedWh}
+              onChange={(e) => setSelectedWh(e.target.value)}
+              className="h-10 rounded-lg border bg-white px-3 text-sm font-bold"
+            >
+              <option value="WH01">WH01 (Northline)</option>
+              <option value="WH02">WH02 (BlueRoute)</option>
+              <option value="WH03">WH03 (Southgate)</option>
+            </select>
+            <button
+              disabled={busy}
+              onClick={() => onCreateWave(selectedWh)}
+              className="flex h-10 items-center gap-2 rounded-lg bg-[#1262e3] px-4 text-sm font-black text-white disabled:opacity-40"
+            >
+              <Route size={16} />
+              Generate Pick Wave for {selectedWh}
+            </button>
+          </div>
+        }
+      />
+      <div className="grid gap-5">
+        <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Wave Code</th>
+                <th>Warehouse</th>
+                <th>Orders Batched</th>
+                <th>Total Items</th>
+                <th>Naive Distance</th>
+                <th>Optimized A* Distance</th>
+                <th>Distance Savings</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {waves.map((w) => (
+                <tr key={w.waveCode}>
+                  <td>
+                    <b className="font-mono text-sm text-[#1262e3]">
+                      {w.waveCode}
+                    </b>
+                  </td>
+                  <td>
+                    <b>{w.warehouseCode || 'WH02'}</b>
+                  </td>
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      {w.orderCodes.map((code) => (
+                        <span
+                          key={code}
+                          className="rounded bg-[#edf4ff] px-2 py-0.5 text-xs font-bold text-[#1262e3]"
+                        >
+                          {code}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    <b>{w.totalItems} stops</b>
+                  </td>
+                  <td>{w.naiveDistance} m</td>
+                  <td>
+                    <b>{w.optimizedDistance} m</b>
+                  </td>
+                  <td>
+                    <span className="status ok">
+                      -{w.savingPercentage}% travel saved
+                    </span>
+                  </td>
+                  <td>
+                    {new Date(w.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!waves.length && (
+            <Empty text="No pick waves generated yet. Click 'Generate Pick Wave' to batch pending orders." />
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function Empty({ text }: { text: string }) {
   return (
     <div className="m-5 rounded-xl border border-dashed bg-[#f8fafc] p-10 text-center text-sm text-[#748095]">

@@ -16,6 +16,7 @@ export type Product = {
   name: string;
   category: string;
   pricePaise: number;
+  reorderPoint: number;
   locations: Array<{
     inventoryId: string;
     warehouseId: string;
@@ -64,14 +65,44 @@ export type PickTask = {
   status: string;
   employeeCode: string | null;
   totalDistance: number;
+  naiveDistance?: number;
+  optimizedDistance?: number;
+  savingPercentage?: number;
   route: Array<{ x: number; y: number }>;
   items: PickItem[];
 };
+
+export type PickWaveData = {
+  waveCode: string;
+  warehouseId: string;
+  warehouseCode: string;
+  orderCodes: string[];
+  totalItems: number;
+  naiveDistance: number;
+  optimizedDistance: number;
+  savingPercentage: number;
+  createdAt: string;
+};
+
+export type CoPurchaseAffinityData = {
+  productAId: string;
+  productAName: string;
+  productBId: string;
+  productBName: string;
+  coOccurrenceCount: number;
+  support: number;
+  confidenceAtoB: number;
+  confidenceBtoA: number;
+  recommendation: string;
+};
+
 export type AppState = {
   warehouses: Warehouse[];
   products: Product[];
   movements: Movement[];
   tasks: PickTask[];
+  pickWaves?: PickWaveData[];
+  copurchaseAffinities?: CoPurchaseAffinityData[];
   orders: Array<{
     id: string;
     code: string;
@@ -82,6 +113,7 @@ export type AppState = {
     createdAt: string;
     allocationReason: string | null;
     itemCount: number;
+    paymentId?: string;
   }>;
 };
 

@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import '../components/stockup/inventory-workspace.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -133,32 +134,129 @@ body {
   }
 }
 
-button, input, select { font: inherit; }
-button { cursor: pointer; }
-.network-map { position: relative; min-height: 590px; overflow: hidden; border: 1px solid #d9e1e9; border-radius: 1rem; background: #edf3f8; box-shadow: 0 18px 45px rgba(20,33,61,.08); }
-.warehouse-canvas { height: min(68vh, 620px); min-height: 480px; overflow: hidden; }
-.warehouse-canvas svg { transform-origin: center; transition: transform .2s ease; }
-.map-label { font-size: 15px; font-weight: 900; fill: #12213f; letter-spacing: .08em; }
-.map-small { font-size: 12px; font-weight: 700; fill: #1262e3; }
-.row-label { font-size: 13px; font-weight: 900; fill: #607087; }
-.status { display: inline-flex; align-items: center; border-radius: 999px; padding: .3rem .58rem; font-size: .65rem; line-height: 1; font-weight: 900; letter-spacing: .04em; white-space: nowrap; }
-.status.ok { color: #176b3a; background: #e7f8ed; }
-.status.warn { color: #9b5f08; background: #fff1d8; }
-.status.blue { color: #145ab5; background: #e7f1ff; }
-.data-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-.data-table th { background: #f7f9fb; color: #748095; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; text-align: left; padding: .9rem 1rem; border-bottom: 1px solid #e2e7ed; }
-.data-table td { padding: 1rem; border-bottom: 1px solid #edf0f3; vertical-align: middle; }
-.data-table tbody tr:hover { background: #fafdff; }
-.data-table small { display: block; margin-top: .2rem; color: #8490a1; font-size: .72rem; }
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+.network-map {
+  position: relative;
+  min-height: 590px;
+  overflow: hidden;
+  border: 1px solid #d9e1e9;
+  border-radius: 1rem;
+  background: #edf3f8;
+  box-shadow: 0 18px 45px rgba(20, 33, 61, 0.08);
+}
+.warehouse-canvas {
+  height: min(68vh, 620px);
+  min-height: 480px;
+  overflow: hidden;
+}
+.warehouse-canvas svg {
+  transform-origin: center;
+  transition: transform 0.2s ease;
+}
+.map-label {
+  font-size: 15px;
+  font-weight: 900;
+  fill: #12213f;
+  letter-spacing: 0.08em;
+}
+.map-small {
+  font-size: 12px;
+  font-weight: 700;
+  fill: #1262e3;
+}
+.row-label {
+  font-size: 13px;
+  font-weight: 900;
+  fill: #607087;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.3rem 0.58rem;
+  font-size: 0.65rem;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.status.ok {
+  color: #176b3a;
+  background: #e7f8ed;
+}
+.status.warn {
+  color: #9b5f08;
+  background: #fff1d8;
+}
+.status.blue {
+  color: #145ab5;
+  background: #e7f1ff;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.data-table th {
+  background: #f7f9fb;
+  color: #748095;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: left;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid #e2e7ed;
+}
+.data-table td {
+  padding: 1rem;
+  border-bottom: 1px solid #edf0f3;
+  vertical-align: middle;
+}
+.data-table tbody tr:hover {
+  background: #fafdff;
+}
+.data-table small {
+  display: block;
+  margin-top: 0.2rem;
+  color: #8490a1;
+  font-size: 0.72rem;
+}
 @media (max-width: 850px) {
-  .network-map { min-height: 720px; }
-  .network-map > button { transform: translate(-50%,-50%) scale(.88); }
-  .data-table { min-width: 900px; }
-  .data-table + * { overflow-x: auto; }
+  .network-map {
+    min-height: 720px;
+  }
+  .network-map > button {
+    transform: translate(-50%, -50%) scale(0.88);
+  }
+  .data-table {
+    min-width: 900px;
+  }
+  .data-table + * {
+    overflow-x: auto;
+  }
 }
 @media (max-width: 640px) {
-  .network-map > button:nth-of-type(1) { left: 50% !important; top: 25% !important; }
-  .network-map > button:nth-of-type(2) { left: 50% !important; top: 52% !important; }
-  .network-map > button:nth-of-type(3) { left: 50% !important; top: 78% !important; }
-  .warehouse-canvas { min-height: 400px; height: 50vh; }
+  .network-map > button:nth-of-type(1) {
+    left: 50% !important;
+    top: 25% !important;
+  }
+  .network-map > button:nth-of-type(2) {
+    left: 50% !important;
+    top: 52% !important;
+  }
+  .network-map > button:nth-of-type(3) {
+    left: 50% !important;
+    top: 78% !important;
+  }
+  .warehouse-canvas {
+    min-height: 400px;
+    height: 50vh;
+  }
 }

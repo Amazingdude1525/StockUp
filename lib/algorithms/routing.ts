@@ -170,3 +170,29 @@ export function warehouseAStarRoute(stops: Point[]) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   return pathIds.map((id) => byId.get(id)!).filter(Boolean);
 }
+
+export function calculateRouteMetrics(stops: Point[]) {
+  const cp: Point = { id: 'CP', x: 60, y: 520 };
+  const naivePoints = [cp, ...stops, cp];
+  const naiveDistance = Math.round(routeDistance(naivePoints) * 0.1);
+
+  const optimizedPath = warehouseAStarRoute(stops);
+  const optimizedDistance = Math.round(routeDistance(optimizedPath) * 0.1);
+
+  const savingPercentage =
+    naiveDistance > 0
+      ? Math.max(
+          0,
+          Math.round(
+            ((naiveDistance - optimizedDistance) / naiveDistance) * 1000,
+          ) / 10,
+        )
+      : 0;
+
+  return {
+    naiveDistance,
+    optimizedDistance,
+    savingPercentage,
+    path: optimizedPath,
+  };
+}

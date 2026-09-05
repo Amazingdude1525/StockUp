@@ -1,12 +1,28 @@
-# Test Plan
+# Test Plan & Verification Matrix
 
-- Search by name, SKU, barcode, and location returns the same inventory rows as the database.
-- A valid cart creates one order, item rows, reservations, one allocation, and one task.
-- Allocation prefers a full-order low-load warehouse and persists its explanation.
-- Conditional reservation updates prevent available stock from becoming negative.
-- Wrong barcode returns 400 and changes no inventory or task state.
-- Verified pick decrements on-hand and reserved equally, consumes the reservation, and appends OUTWARD.
-- Missing item moves the reservation to an eligible alternate bin or marks EXCEPTION.
-- A route starts/ends at check-in, follows only graph edges, and 2-opt is no worse than the initial tour.
-- Low stock is derived from available quantity and reorder point.
-- Transfer tests must assert source decrease, destination increase, and one immutable movement in one transaction.
+StockUp includes automated and reproducible verification for all critical warehouse scenarios:
+
+- **TEST 1: Global Search**:
+  Search "coke" via UI or `Ctrl+K` shortcut → Returns exact physical locations (`WH01-R02-B014`, `WH02-R03-B008`) and live quantities.
+- **TEST 2: Customer Order & Reservation**:
+  Customer places order → Order created, inventory reserved (`quantity_reserved` increased, `quantity_available` decremented), warehouse allocated.
+- **TEST 3: Concurrent Overselling Prevention**:
+  Two concurrent orders request same stock → Transactional lock ensures available stock never becomes negative.
+- **TEST 4: Verified Pick Confirmation**:
+  Picker scans expected barcode → `quantity_on_hand` and `quantity_reserved` decremented equally, reservation marked `CONSUMED`, `OUTWARD` movement logged.
+- **TEST 5: Wrong Barcode Prevention**:
+  Picker scans mismatched barcode → Server returns 400 error (`WRONG PRODUCT`), no stock or task state changed.
+- **TEST 6: Item Not Found Rerouting**:
+  Picker clicks "Item Not Found" → Exception logged, reservation transferred to alternate bin, A* route recalculated.
+- **TEST 7: Intra-Warehouse Stock Transfer**:
+  Transfer stock between bins → Source decrements, destination increments, immutable `TRANSFER` movement created.
+- **TEST 8: Low-Stock Alerts**:
+  Available quantity <= reorder point → Location highlighted in red and listed under low-stock alerts.
+- **TEST 9: Obstacle-Aware Routing**:
+  A* pathfinder calculates route → Path follows only corridor nodes, never crossing blocked storage racks.
+- **TEST 10: Multi-Stop TSP Optimization**:
+  2-Opt optimization pipeline executes → Optimized distance <= Naive direct distance (`savingPercentage = ((naive - opt)/naive) * 100`).
+- **TEST 11: Warehouse Allocation Scoring**:
+  Allocation engine evaluates 3 warehouses → Selects full-order feasibility warehouse and outputs "WHY WH02" explanation.
+- **TEST 12: Split Fulfilment Engine**:
+  No single warehouse has full order → Greedy set-cover algorithm generates optimal split allocation recommendation (`WH01` + `WH03`).

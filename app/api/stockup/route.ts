@@ -4,8 +4,12 @@ import { selectWarehouse } from '@/lib/algorithms/allocation';
 import {
   warehouseAStarRoute,
   routeDistance,
+  calculateRouteMetrics,
   type Point,
 } from '@/lib/algorithms/routing';
+import { computeSplitFulfilment } from '@/lib/algorithms/splitFulfilment';
+import { createPickWave } from '@/lib/algorithms/pickWave';
+import { computeCoPurchaseMatrix } from '@/lib/algorithms/copurchase';
 
 type D1 = D1Database;
 const now = () => new Date().toISOString();
@@ -61,6 +65,9 @@ async function ensureAccessSchema(db: D1) {
     ),
     db.prepare(
       'CREATE INDEX IF NOT EXISTS idx_staff_sessions_expiry ON staff_sessions(expires_at)',
+    ),
+    db.prepare(
+      'CREATE TABLE IF NOT EXISTS pick_waves(id TEXT PRIMARY KEY, code TEXT UNIQUE, warehouse_id TEXT, order_codes_json TEXT, total_items INTEGER, naive_distance REAL, optimized_distance REAL, saving_percentage REAL, created_at TEXT)',
     ),
   ]);
   const existing = await db
@@ -427,7 +434,7 @@ async function state(db: D1) {
       .prepare(
         'SELECT * FROM products WHERE id IN (' +
           showcase.map(() => '?').join(',') +
-          ') ORDER BY id',
+          ") OR id LIKE 'PUSR-%' ORDER BY id",
       )
       .bind(...showcase.map((p) => p[0]))
       .all(),
@@ -472,6 +479,7 @@ async function state(db: D1) {
     products: prods.results.map((p: any) => ({
       ...p,
       pricePaise: p.price_paise,
+      reorderPoint: p.reorder_point,
       locations: locs.results
         .filter((l: any) => l.product_id === p.id)
         .map((l: any) => ({
@@ -510,15 +518,8 @@ async function state(db: D1) {
       allocationReason: o.allocation_reason,
       itemCount: o.item_count,
     })),
-    tasks: tasks.results.map((t: any) => ({
-      id: t.id,
-      code: t.code,
-      orderCode: t.order_code,
-      status: t.status,
-      employeeCode: t.employee_code,
-      totalDistance: t.total_distance,
-      route: JSON.parse(t.route_json),
-      items: items.results
+    tasks: tasks.results.map((t: any) => {
+      const taskItems = items.results
         .filter((i: any) => i.pick_task_id === t.id)
         .map((i: any) => ({
           id: i.id,
@@ -535,8 +536,31 @@ async function state(db: D1) {
           binCode: i.bin_code,
           x: i.x,
           y: i.y,
-        })),
-    })),
+        }));
+      const points = taskItems.map((i) => ({ id: i.id, x: i.x, y: i.y }));
+      const metrics = calculateRouteMetrics(points);
+      return {
+        id: t.id,
+        code: t.code,
+        orderCode: t.order_code,
+        status: t.status,
+        employeeCode: t.employee_code,
+        totalDistance: t.total_distance,
+        naiveDistance: metrics.naiveDistance,
+        optimizedDistance: metrics.optimizedDistance,
+        savingPercentage: metrics.savingPercentage,
+        route: JSON.parse(t.route_json),
+        items: taskItems,
+      };
+    }),
+    copurchaseAffinities: computeCoPurchaseMatrix(
+      items.results.map((i: any) => ({
+        orderId: i.pick_task_id,
+        productId: i.product_id,
+        productName: i.product_name,
+      })),
+      orders.results.length || 1,
+    ),
   };
 }
 
@@ -579,12 +603,19 @@ async function createOrder(db: D1, body: any) {
       items: entries,
     });
   }
-  const ranked = selectWarehouse(candidates),
-    chosen = ranked.find((w) => w.full);
-  if (!chosen)
-    throw new Error(
-      'No single warehouse can fulfil this cart. Split fulfilment recommendation required.',
-    );
+  const ranked = selectWarehouse(candidates);
+  let chosen = ranked.find((w) => w.full);
+  let splitExplanation = '';
+
+  if (!chosen) {
+    const splitResult = computeSplitFulfilment(candidates, cart);
+    if (!splitResult.allocations.length) {
+      throw new Error('Insufficient network inventory to fulfil this cart.');
+    }
+    const primaryAlloc = splitResult.allocations[0];
+    chosen = ranked.find((w) => w.id === primaryAlloc.warehouseId) || ranked[0];
+    splitExplanation = splitResult.reason;
+  }
   const productRows = (
     await db.prepare('SELECT id,price_paise FROM products').all()
   ).results as any[];
@@ -617,7 +648,9 @@ async function createOrder(db: D1, body: any) {
     distance = routeDistance(optimized) * 0.1,
     taskId = id('TASK'),
     taskCode = `PT-${String(count).padStart(5, '0')}`,
-    reason = `${chosen.covered}/${chosen.total} SKUs available · 100% unit coverage · ${chosen.loadPercent}% load · ${Math.round(distance)}m A* route · no split required`;
+    reason = splitExplanation
+      ? splitExplanation
+      : `${chosen.covered}/${chosen.total} SKUs available · 100% unit coverage · ${chosen.loadPercent}% load · ${Math.round(distance)}m A* route · no split required`;
   const total = cart.reduce(
     (s: any, i: any) =>
       s +
@@ -866,6 +899,146 @@ async function reportMissing(db: D1, body: any, staff: StaffIdentity) {
   return { resolution, rerouted: Boolean(alt) };
 }
 
+async function createInventoryItem(db: D1, body: any, staff: StaffIdentity) {
+  const name = String(body.name || '').trim();
+  const sku = String(body.sku || '')
+    .trim()
+    .toUpperCase();
+  const barcode = String(body.barcode || '').trim();
+  const category = String(body.category || 'General').trim();
+  const pricePaise = Number(body.pricePaise);
+  const reorderPoint = Number(body.reorderPoint);
+  const openingStock = Number(body.openingStock);
+  const locationCode = String(body.locationCode || '')
+    .trim()
+    .toUpperCase();
+  if (name.length < 2 || name.length > 100)
+    throw new Error('Item name must be 2–100 characters.');
+  if (!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(sku))
+    throw new Error(
+      'SKU must be 3–32 letters, numbers, dashes, or underscores.',
+    );
+  if (!/^[A-Za-z0-9_-]{4,48}$/.test(barcode))
+    throw new Error('Barcode must be 4–48 letters or numbers.');
+  if (!Number.isInteger(pricePaise) || pricePaise <= 0)
+    throw new Error('Unit price must be positive.');
+  if (!Number.isInteger(reorderPoint) || reorderPoint < 0)
+    throw new Error('Reorder point must be zero or more.');
+  if (!Number.isInteger(openingStock) || openingStock <= 0)
+    throw new Error('Opening stock must be a positive integer.');
+  const bin = await db
+    .prepare(
+      'SELECT b.*,w.code warehouse_code FROM bins b JOIN warehouses w ON w.id=b.warehouse_id WHERE b.location_code=?',
+    )
+    .bind(locationCode)
+    .first<any>();
+  if (!bin) throw new Error('Opening location does not exist.');
+  if (staff.warehouseCode && staff.warehouseCode !== bin.warehouse_code)
+    throw new Error(
+      'Warehouse managers can create stock only in their assigned warehouse.',
+    );
+  const duplicate = await db
+    .prepare('SELECT id FROM products WHERE sku=? OR barcode=?')
+    .bind(sku, barcode)
+    .first();
+  if (duplicate) throw new Error('This SKU or barcode already exists.');
+  const productId = id('PUSR');
+  const inventoryId = id('INV');
+  const referenceId = 'GRN-' + Date.now().toString().slice(-8);
+  await db.batch([
+    db
+      .prepare(
+        'INSERT INTO products(id,sku,barcode,name,category,price_paise,reorder_point) VALUES(?,?,?,?,?,?,?)',
+      )
+      .bind(productId, sku, barcode, name, category, pricePaise, reorderPoint),
+    db
+      .prepare(
+        'INSERT INTO inventory_locations(id,product_id,warehouse_id,bin_id,quantity_on_hand,quantity_reserved) VALUES(?,?,?,?,?,0)',
+      )
+      .bind(inventoryId, productId, bin.warehouse_id, bin.id, openingStock),
+    db
+      .prepare(
+        'INSERT INTO stock_movements(id,product_id,warehouse_id,source_bin_id,destination_bin_id,quantity,movement_type,order_id,employee_code,reference_id,created_at,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .bind(
+        id('MOV'),
+        productId,
+        bin.warehouse_id,
+        null,
+        bin.id,
+        openingStock,
+        'INWARD',
+        null,
+        staff.staffCode,
+        referenceId,
+        now(),
+        JSON.stringify({ reason: 'NEW_ITEM_OPENING_STOCK' }),
+      ),
+  ]);
+  return {
+    productId,
+    inventoryId,
+    sku,
+    locationCode,
+    openingStock,
+    referenceId,
+  };
+}
+
+async function adjustInventory(db: D1, body: any, staff: StaffIdentity) {
+  const delta = Number(body.delta);
+  const reason = String(body.reason || '').trim();
+  if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 10000)
+    throw new Error(
+      'Adjustment must be a non-zero integer within 10,000 units.',
+    );
+  if (reason.length < 3 || reason.length > 160)
+    throw new Error('Enter a clear adjustment reason.');
+  const row = await db
+    .prepare(
+      'SELECT il.*,b.location_code,b.id bin_id,w.code warehouse_code FROM inventory_locations il JOIN bins b ON b.id=il.bin_id JOIN warehouses w ON w.id=il.warehouse_id WHERE il.id=?',
+    )
+    .bind(String(body.inventoryId || ''))
+    .first<any>();
+  if (!row) throw new Error('Inventory location not found.');
+  if (staff.warehouseCode && staff.warehouseCode !== row.warehouse_code)
+    throw new Error(
+      'Warehouse managers can adjust stock only in their assigned warehouse.',
+    );
+  const nextOnHand = row.quantity_on_hand + delta;
+  if (nextOnHand < row.quantity_reserved || nextOnHand < 0)
+    throw new Error(
+      `Adjustment would violate reserved inventory. Minimum allowed on-hand is ${row.quantity_reserved}.`,
+    );
+  const referenceId = 'ADJ-' + Date.now().toString().slice(-8);
+  await db.batch([
+    db
+      .prepare(
+        'UPDATE inventory_locations SET quantity_on_hand=? WHERE id=? AND quantity_on_hand=?',
+      )
+      .bind(nextOnHand, row.id, row.quantity_on_hand),
+    db
+      .prepare(
+        'INSERT INTO stock_movements(id,product_id,warehouse_id,source_bin_id,destination_bin_id,quantity,movement_type,order_id,employee_code,reference_id,created_at,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .bind(
+        id('MOV'),
+        row.product_id,
+        row.warehouse_id,
+        delta < 0 ? row.bin_id : null,
+        delta > 0 ? row.bin_id : null,
+        Math.abs(delta),
+        'ADJUSTMENT',
+        null,
+        staff.staffCode,
+        referenceId,
+        now(),
+        JSON.stringify({ reason, delta }),
+      ),
+  ]);
+  return { referenceId, inventoryId: row.id, onHand: nextOnHand, delta };
+}
+
 async function startTask(db: D1, body: any, staff: StaffIdentity) {
   const task = await db
     .prepare('SELECT id,order_id,status FROM pick_tasks WHERE id=?')
@@ -1000,6 +1173,88 @@ async function simulateSurge(db: D1, staff: StaffIdentity) {
   return { created, initiatedBy: staff.staffCode };
 }
 
+async function handleCreatePickWave(db: D1, body: any, staff: StaffIdentity) {
+  const warehouseCode = body.warehouseCode || 'WH02';
+  const warehouse = await db
+    .prepare('SELECT id FROM warehouses WHERE code=?')
+    .bind(warehouseCode)
+    .first<{ id: string }>();
+
+  if (!warehouse) throw new Error('Warehouse not found.');
+
+  const pendingTasks = (
+    await db
+      .prepare(
+        "SELECT pt.id task_id, pt.code task_code, o.id order_id, o.code order_code FROM pick_tasks pt JOIN orders o ON o.id=pt.order_id WHERE pt.warehouse_id=? AND pt.status IN ('ASSIGNED', 'STARTED')",
+      )
+      .bind(warehouse.id)
+      .all()
+  ).results as any[];
+
+  if (!pendingTasks.length) {
+    throw new Error(
+      'No pending tasks available in this warehouse for wave generation.',
+    );
+  }
+
+  const waveOrders = [];
+  for (const t of pendingTasks) {
+    const taskItems = (
+      await db
+        .prepare(
+          'SELECT pti.id item_id, oi.product_id, p.name product_name, b.location_code, b.x, b.y, pti.quantity FROM pick_task_items pti JOIN order_items oi ON oi.id=pti.order_item_id JOIN products p ON p.id=oi.product_id JOIN inventory_locations il ON il.id=pti.inventory_location_id JOIN bins b ON b.id=il.bin_id WHERE pti.pick_task_id=?',
+        )
+        .bind(t.task_id)
+        .all()
+    ).results as any[];
+
+    waveOrders.push({
+      orderId: t.order_id,
+      orderCode: t.order_code,
+      warehouseId: warehouse.id,
+      items: taskItems.map((i) => ({
+        itemId: i.item_id,
+        productId: i.product_id,
+        productName: i.product_name,
+        locationCode: i.location_code,
+        x: i.x,
+        y: i.y,
+        quantity: i.quantity,
+      })),
+    });
+  }
+
+  const waveCount =
+    (
+      await db
+        .prepare('SELECT COUNT(*) count FROM pick_waves')
+        .first<{ count: number }>()
+    )?.count ?? 0;
+
+  const waveResult = createPickWave(waveOrders, waveCount + 31);
+  if (!waveResult) throw new Error('Could not create pick wave.');
+
+  const waveId = id('PW');
+  await db
+    .prepare(
+      'INSERT INTO pick_waves(id, code, warehouse_id, order_codes_json, total_items, naive_distance, optimized_distance, saving_percentage, created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+    )
+    .bind(
+      waveId,
+      waveResult.waveCode,
+      warehouse.id,
+      JSON.stringify(waveResult.orderCodes),
+      waveResult.totalItems,
+      waveResult.naiveDistance,
+      waveResult.optimizedDistance,
+      waveResult.savingPercentage,
+      now(),
+    )
+    .run();
+
+  return waveResult;
+}
+
 export async function GET() {
   try {
     const db = env.DB as D1;
@@ -1025,6 +1280,24 @@ export async function POST(req: Request) {
       result = await staffLogout(db, body);
     else if (body.action === 'createOrder')
       result = await createOrder(db, body);
+    else if (body.action === 'createInventoryItem')
+      result = await createInventoryItem(
+        db,
+        body,
+        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+      );
+    else if (body.action === 'adjustInventory')
+      result = await adjustInventory(
+        db,
+        body,
+        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+      );
+    else if (body.action === 'createPickWave')
+      result = await handleCreatePickWave(
+        db,
+        body,
+        await requireStaff(db, body, ['WAREHOUSE_MANAGER', 'NETWORK_ADMIN']),
+      );
     else if (body.action === 'confirmPick')
       result = await confirmPick(
         db,
