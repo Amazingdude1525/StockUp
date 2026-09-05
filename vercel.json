@@ -1,9 +1,14 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist/client",
+  "functions": {
+    "api/*.ts": {
+      "runtime": "nodejs22.x"
+    }
+  },
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]

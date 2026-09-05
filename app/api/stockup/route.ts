@@ -1,15 +1,14 @@
-import { NextResponse } from 'next/server';
-import { getInMemoryD1 } from '@/lib/db/inMemoryD1';
-import { selectWarehouse } from '@/lib/algorithms/allocation';
+import { getInMemoryD1 } from '../../../lib/db/inMemoryD1';
+import { selectWarehouse } from '../../../lib/algorithms/allocation';
 import {
   warehouseAStarRoute,
   routeDistance,
   calculateRouteMetrics,
   type Point,
-} from '@/lib/algorithms/routing';
-import { computeSplitFulfilment } from '@/lib/algorithms/splitFulfilment';
-import { createPickWave } from '@/lib/algorithms/pickWave';
-import { computeCoPurchaseMatrix } from '@/lib/algorithms/copurchase';
+} from '../../../lib/algorithms/routing';
+import { computeSplitFulfilment } from '../../../lib/algorithms/splitFulfilment';
+import { createPickWave } from '../../../lib/algorithms/pickWave';
+import { computeCoPurchaseMatrix } from '../../../lib/algorithms/copurchase';
 
 type D1 = D1Database;
 const now = () => new Date().toISOString();
@@ -1268,9 +1267,9 @@ export async function GET() {
     const db = await getDatabase();
     await ensureAccessSchema(db);
     await seed(db);
-    return NextResponse.json(await state(db));
+    return Response.json(await state(db));
   } catch (e) {
-    return NextResponse.json(
+    return Response.json(
       { error: e instanceof Error ? e.message : 'Database error' },
       { status: 500 },
     );
@@ -1336,9 +1335,9 @@ export async function POST(req: Request) {
         await requireStaff(db, body, ['NETWORK_ADMIN']),
       );
     else throw new Error('Unsupported action.');
-    return NextResponse.json({ ok: true, result, state: await state(db) });
+    return Response.json({ ok: true, result, state: await state(db) });
   } catch (e) {
-    return NextResponse.json(
+    return Response.json(
       { error: e instanceof Error ? e.message : 'Operation failed' },
       { status: 400 },
     );

@@ -1,5 +1,4 @@
-import { NextResponse } from 'next/server';
-import { createTestOrderId, getRazorpayKeyId } from '@/lib/razorpay';
+import { createTestOrderId, getRazorpayKeyId } from '../../../lib/razorpay';
 
 export async function POST(req: Request) {
   try {
@@ -8,13 +7,13 @@ export async function POST(req: Request) {
 
     if (action === 'createRazorpayOrder') {
       if (!amountPaise || amountPaise <= 0) {
-        return NextResponse.json({ error: 'Invalid order amount' }, { status: 400 });
+        return Response.json({ error: 'Invalid order amount' }, { status: 400 });
       }
 
       const razorpayOrderId = createTestOrderId();
       const keyId = getRazorpayKeyId();
 
-      return NextResponse.json({
+      return Response.json({
         ok: true,
         razorpayOrderId,
         amountPaise,
@@ -27,10 +26,10 @@ export async function POST(req: Request) {
     if (action === 'verifyPayment') {
       const { paymentId, orderId } = body;
       if (!paymentId || !orderId) {
-        return NextResponse.json({ error: 'Missing payment parameters' }, { status: 400 });
+        return Response.json({ error: 'Missing payment parameters' }, { status: 400 });
       }
 
-      return NextResponse.json({
+      return Response.json({
         ok: true,
         verified: true,
         paymentId,
@@ -38,9 +37,9 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
+    return Response.json({ error: 'Unsupported action' }, { status: 400 });
   } catch (err) {
-    return NextResponse.json(
+    return Response.json(
       { error: err instanceof Error ? err.message : 'Payment error' },
       { status: 500 }
     );

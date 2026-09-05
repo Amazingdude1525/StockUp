@@ -1,8 +1,6 @@
-import { GET as getHandler, POST as postHandler } from '../app/api/stockup/route';
+export const runtime = 'nodejs';
 
-export const config = {
-  runtime: 'edge',
-};
+import { GET as getHandler, POST as postHandler } from '../app/api/stockup/route';
 
 export async function GET(req: Request) {
   return getHandler();

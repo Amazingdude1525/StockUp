@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import BrandLogo from '@/components/stockup/brand-logo';
 import InventoryWorkspace from '@/components/stockup/inventory-workspace';
+import LandingPage from '@/components/stockup/landing-page';
 import type {
   AppState,
   PickTask,
@@ -74,6 +75,7 @@ const statusClass = (s: string) =>
 
 export default function StockUpApp() {
   const [data, setData] = useState<AppState | null>(null);
+  const [showLanding, setShowLanding] = useState(true);
   const [panel, setPanel] = useState<Panel>('admin');
   const [view, setView] = useState<View>('network');
   const [warehouse, setWarehouse] = useState('WH02');
@@ -217,6 +219,25 @@ export default function StockUpApp() {
     );
   }, [data, query]);
 
+  if (showLanding) {
+    return (
+      <LandingPage
+        data={data}
+        onExplore={() => {
+          setShowLanding(false);
+          enterPanel('customer');
+        }}
+        onAdmin={() => {
+          setShowLanding(false);
+          enterPanel('admin');
+        }}
+        onWorker={() => {
+          setShowLanding(false);
+          enterPanel('worker');
+        }}
+      />
+    );
+  }
   if (!data) return <Loading error={error} retry={load} />;
   const selectedWarehouse =
     data.warehouses.find((item) => item.code === warehouse) ??
@@ -270,6 +291,7 @@ export default function StockUpApp() {
             setView('shop');
           }}
           onAlerts={() => setView('intelligence')}
+          onHome={() => setShowLanding(true)}
           onSimulation={async () => {
             try {
               const result = await act(
@@ -760,6 +782,7 @@ function Topbar({
   openCart,
   onAlerts,
   onSimulation,
+  onHome,
 }: {
   panel: Panel;
   view: View;
@@ -773,13 +796,18 @@ function Topbar({
   openCart: () => void;
   onAlerts: () => void;
   onSimulation: () => void;
+  onHome: () => void;
 }) {
   return (
     <header className="sticky top-0 z-10 border-b border-[#dfe5ec] bg-white/95 backdrop-blur">
       <div className="flex min-h-[74px] items-center gap-3 px-4 md:px-8">
-        <div className="lg:hidden">
+        <button
+          className="lg:hidden"
+          aria-label="Return to StockUp website"
+          onClick={onHome}
+        >
           <BrandLogo compact />
-        </div>
+        </button>
         <div className="order-3 flex w-full items-center rounded-xl bg-[#f1f4f7] p-1 md:order-none md:w-auto">
           {(
             [
