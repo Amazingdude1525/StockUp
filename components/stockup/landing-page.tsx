@@ -181,13 +181,6 @@ export default function LandingPage({
         className={`poster-carousel ${current.tone}`}
         aria-roledescription="carousel"
         aria-label="StockUp product overview"
-        onMouseEnter={() => setPaused(true)}
-        onMouseLeave={() => setPaused(false)}
-        onFocus={() => setPaused(true)}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget))
-            setPaused(false);
-        }}
       >
         {slides.map((item, index) => (
           <div
@@ -239,6 +232,13 @@ export default function LandingPage({
           </button>
           <button aria-label="Next poster" onClick={() => go(slide + 1)}>
             <ArrowRight />
+          </button>
+          <button
+            aria-label={paused ? 'Play slideshow' : 'Pause slideshow'}
+            aria-pressed={paused}
+            onClick={() => setPaused((value) => !value)}
+          >
+            {paused ? <Play /> : <Pause />}
           </button>
         </div>
         <div className="poster-progress" key={slide} />
@@ -754,7 +754,7 @@ function OperationalExplainer({
 
 function WarehouseRouteMap({ compact = false }: { compact?: boolean }) {
   return (
-    <div
+    <figure
       className={
         compact
           ? 'warehouse-route-map compact'
@@ -778,7 +778,6 @@ function WarehouseRouteMap({ compact = false }: { compact?: boolean }) {
       </div>
       <svg
         viewBox="0 0 600 300"
-        role="img"
         aria-label="Blue optimized route with four numbered stops"
       >
         <path d="M62 260 C110 230 92 182 150 178 S228 212 265 156 S340 90 390 112 S442 190 520 76" />
