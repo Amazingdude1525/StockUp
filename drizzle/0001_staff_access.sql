@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `staff_access` (
 	`role` text NOT NULL,
 	`display_name` text NOT NULL,
 	`created_at` text NOT NULL
-+);
+);
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `staff_sessions` (
 	`token_hash` text PRIMARY KEY NOT NULL,
@@ -14,6 +14,6 @@ CREATE TABLE IF NOT EXISTS `staff_sessions` (
 	`expires_at` text NOT NULL,
 	`created_at` text NOT NULL,
 	FOREIGN KEY (`staff_code`) REFERENCES `staff_access`(`code`) ON UPDATE no action ON DELETE cascade
-+);
+);
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_staff_sessions_expiry` ON `staff_sessions` (`expires_at`);
