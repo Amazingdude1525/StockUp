@@ -640,10 +640,10 @@ export default function LandingPage({
 
       <section className="landing-section hackathon-section" id="about">
         <div>
-          <p className="landing-eyebrow">Hackathon project</p>
-          <h2>Built for PS-3.</h2>
+          <p className="landing-eyebrow">Platform Architecture</p>
+          <h2>Built for PS-3 Specification Compliance.</h2>
           <p>
-            StockUp was developed for{' '}
+            StockUp was engineered for{' '}
             <b>
               E-Commerce Multi-Warehouse Inventory & Location Tracking System
             </b>
@@ -652,7 +652,7 @@ export default function LandingPage({
           <span>Category · Pure Hard Development</span>
         </div>
         <div className="team-card">
-          <small>Made by</small>
+          <small>Engineered by</small>
           <div>
             <b>Prateek Das</b>
             <span>25BCE10599</span>
@@ -705,7 +705,7 @@ export default function LandingPage({
           <button onClick={onWorker}>Warehouse login</button>
         </div>
         <p className="footer-credit">
-          Hackathon Project · Made by Prateek Das (25BCE10599) and Anushka
+          StockUp — Multi-Warehouse Fulfillment OS · Developed by Prateek Das (25BCE10599) & Anushka
           Chatterjee (25BCE11276)
         </p>
       </footer>

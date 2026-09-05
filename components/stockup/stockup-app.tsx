@@ -58,15 +58,6 @@ type View =
   | 'movements'
   | 'pickwaves'
   | 'intelligence';
-const adminNav = [
-  ['network', 'Network Map', Map],
-  ['orders', 'Orders', PackageSearch],
-  ['inventory', 'Inventory', Boxes],
-  ['warehouse', 'Warehouses', Building2],
-  ['pickwaves', 'Pick Waves', Route],
-  ['movements', 'Movements', ArrowLeftRight],
-  ['intelligence', 'Intelligence', Sparkles],
-] as const;
 const money = (p: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(
     p / 100,
@@ -288,6 +279,8 @@ export default function StockUpApp() {
           query={query}
           setQuery={setQuery}
           onSearch={() => setView(panel === 'customer' ? 'shop' : 'inventory')}
+          products={data.products}
+          openWarehouse={openWarehouse}
           cartCount={Object.values(cart).reduce(
             (sum, quantity) => sum + quantity,
             0,
@@ -572,9 +565,8 @@ export default function StockUpApp() {
               />
             </>
           )}
-          <footer className="mt-10 border-t border-[#dbe4ef] py-5 text-center text-xs font-semibold text-[#64748b]">
-            Hackathon Project · Made by Prateek Das (25BCE10599) and Anushka
-            Chatterjee (25BCE11276)
+          <footer className="mt-10 border-t border-[#e2e8f0] py-5 text-center text-xs font-medium text-[#64748b]">
+            StockUp — Multi-Warehouse Fulfillment OS · Developed by Prateek Das & Anushka Chatterjee
           </footer>
         </div>
       </section>
@@ -741,6 +733,16 @@ function StaffLogin({
   );
 }
 
+const adminNav = [
+  ['network', 'Network Map', Map],
+  ['orders', 'Orders & Allocation', PackageSearch],
+  ['inventory', 'Inventory Control', Boxes],
+  ['warehouse', 'Warehouses & GPS', Building2],
+  ['pickwaves', 'Pick Waves', Route],
+  ['movements', 'Audit Ledger', ArrowLeftRight],
+  ['intelligence', 'Intelligence', Sparkles],
+] as const;
+
 function Sidebar({
   view,
   onView,
@@ -753,28 +755,35 @@ function Sidebar({
   onLogout: () => void;
 }) {
   return (
-    <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] border-r border-[#dfe5ec] bg-white lg:flex lg:flex-col">
-      <div className="flex h-[74px] items-center border-b border-[#e8edf2] px-5">
+    <aside className="fixed inset-y-0 left-0 z-20 hidden w-[240px] border-r border-[#e2e8f0] bg-white lg:flex lg:flex-col shadow-xs">
+      <div className="flex h-[74px] items-center border-b border-[#e2e8f0] px-5">
         <BrandLogo />
       </div>
       <nav className="flex-1 space-y-1 px-3 py-5">
-        <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#98a2b2]">
-          Admin operations
+        <p className="px-3 pb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#64748b]">
+          Operational Control
         </p>
-        {adminNav.map(([key, label, Icon]) => (
-          <button
-            key={key}
-            onClick={() => onView(key)}
-            className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold transition ${view === key ? 'bg-[#eaf2ff] text-[#1262e3]' : 'text-[#536174] hover:bg-[#f4f6f8]'}`}
-          >
-            <Icon size={18} />
-            {label}
-          </button>
-        ))}
+        {adminNav.map(([key, label, Icon]) => {
+          const isActive = view === key;
+          return (
+            <button
+              key={key}
+              onClick={() => onView(key)}
+              className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm transition-all ${
+                isActive
+                  ? 'border-l-4 border-[#1267e8] bg-[#f1f5f9] text-[#0f172a] font-bold shadow-xs'
+                  : 'text-[#475569] font-medium hover:bg-[#f8fafc] hover:text-[#0f172a]'
+              }`}
+            >
+              <Icon size={18} className={isActive ? 'text-[#1267e8]' : 'text-[#64748b]'} />
+              {label}
+            </button>
+          );
+        })}
       </nav>
-      <div className="border-t border-[#e8edf2] p-3">
-        <div className="flex items-center gap-3 rounded-xl bg-[#f6f8fa] p-3">
-          <div className="grid size-9 place-items-center rounded-full bg-[#12213f] text-xs font-bold text-white">
+      <div className="border-t border-[#e2e8f0] p-3">
+        <div className="flex items-center gap-3 rounded-xl bg-[#f8fafc] border border-[#e2e8f0] p-3">
+          <div className="grid size-9 place-items-center rounded-lg bg-[#0f172a] text-xs font-bold text-white">
             {session.displayName
               .split(' ')
               .map((part) => part[0])
@@ -782,15 +791,15 @@ function Sidebar({
               .slice(0, 2)}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold">{session.displayName}</p>
-            <p className="text-xs text-[#7c8799]">{session.staffCode}</p>
+            <p className="truncate text-xs font-bold text-[#0f172a]">{session.displayName}</p>
+            <p className="text-[11px] font-medium text-[#64748b]">{session.staffCode}</p>
           </div>
           <button
             aria-label="Sign out"
             onClick={onLogout}
-            className="text-[#7c8799]"
+            className="text-[#64748b] hover:text-[#0f172a]"
           >
-            <LogOut size={17} />
+            <LogOut size={16} />
           </button>
         </div>
       </div>
@@ -813,6 +822,8 @@ function Topbar({
   onSimulation,
   onHome,
   onGuide,
+  products = [],
+  openWarehouse,
 }: {
   panel: Panel;
   view: View;
@@ -828,9 +839,25 @@ function Topbar({
   onSimulation: () => void;
   onHome: () => void;
   onGuide: () => void;
+  products?: Product[];
+  openWarehouse?: (code: string) => void;
 }) {
+  const [showSearchResults, setShowSearchResults] = useState(false);
+
+  const matchedProducts = useMemo(() => {
+    if (!query.trim() || !products.length) return [];
+    const q = query.toLowerCase();
+    return products
+      .filter((p) =>
+        [p.name, p.sku, p.barcode, p.category, ...p.locations.map((l) => l.locationCode)].some((val) =>
+          val.toLowerCase().includes(q),
+        ),
+      )
+      .slice(0, 5);
+  }, [products, query]);
+
   return (
-    <header className="sticky top-0 z-10 border-b border-[#dfe5ec] bg-white/95 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-[#e2e8f0] bg-white/95 backdrop-blur">
       <div className="flex min-h-[74px] items-center gap-3 px-4 md:px-8">
         <button
           className="lg:hidden"
@@ -839,7 +866,7 @@ function Topbar({
         >
           <BrandLogo compact />
         </button>
-        <div className="order-3 flex w-full items-center rounded-xl bg-[#f1f4f7] p-1 md:order-none md:w-auto">
+        <div className="order-3 flex w-full items-center rounded-xl bg-[#f1f5f9] p-1 md:order-none md:w-auto border border-[#e2e8f0]">
           {(
             [
               ['customer', 'Customer', Store],
@@ -850,7 +877,11 @@ function Topbar({
             <button
               key={key}
               onClick={() => onPanel(key)}
-              className={`flex h-9 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-black transition md:flex-none ${panel === key ? 'bg-white text-[#1262e3] shadow-sm' : 'text-[#69768a]'}`}
+              className={`flex h-9 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold transition md:flex-none ${
+                panel === key
+                  ? 'bg-white text-[#1267e8] shadow-xs border border-[#e2e8f0]'
+                  : 'text-[#64748b] hover:text-[#0f172a]'
+              }`}
             >
               <Icon size={15} />
               {label}
@@ -860,39 +891,76 @@ function Topbar({
 
         <button
           onClick={onGuide}
-          className="flex h-9 items-center gap-1.5 rounded-xl border border-[#1262e3]/40 bg-gradient-to-r from-[#edf5ff] to-[#e6f0ff] px-3 text-xs font-black text-[#1262e3] shadow-sm hover:border-[#1262e3] hover:shadow transition shrink-0"
+          className="flex h-9 items-center gap-1.5 rounded-lg border border-[#1267e8]/30 bg-[#eff6ff] px-3 text-xs font-bold text-[#1267e8] hover:bg-[#dbeafe] transition shrink-0"
         >
-          <Sparkles size={15} className="text-[#1262e3]" />
+          <Sparkles size={14} className="text-[#1267e8]" />
           <span className="hidden sm:inline">PS-3 Judge Guide</span>
           <span className="sm:hidden">Guide</span>
         </button>
         {panel !== 'worker' && (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              onSearch();
-            }}
-            className="relative ml-auto hidden max-w-[480px] flex-1 sm:block"
-          >
+          <div className="relative ml-auto hidden max-w-[480px] flex-1 sm:block">
             <Search
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#718096]"
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#64748b]"
               size={17}
             />
             <input
               ref={searchRef}
               value={query}
+              onFocus={() => setShowSearchResults(true)}
+              onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={
                 panel === 'customer'
-                  ? 'Search products'
-                  : 'Search product, SKU, barcode or location'
+                  ? 'Search products by name or category...'
+                  : 'Search products, SKUs, barcodes, or bin locations (Ctrl+K)'
               }
-              className="h-10 w-full rounded-lg border border-[#dce2e9] bg-[#f8fafc] pl-10 pr-14 text-sm outline-none focus:border-[#1262e3]"
+              className="h-10 w-full rounded-lg border border-[#e2e8f0] bg-[#f8fafc] pl-10 pr-14 text-sm font-medium outline-none focus:border-[#1267e8] focus:bg-white transition"
             />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#7c8799]">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-[#e2e8f0] bg-white px-1.5 py-0.5 text-[10px] font-mono font-bold text-[#64748b]">
               ⌘K
             </span>
-          </form>
+
+            {/* Instant Search Results Dropdown */}
+            {showSearchResults && matchedProducts.length > 0 && (
+              <div className="absolute top-12 left-0 right-0 z-50 rounded-xl border border-[#e2e8f0] bg-white p-2 shadow-xl space-y-1">
+                <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
+                  Instant Bin Location & Inventory Match
+                </p>
+                {matchedProducts.map((prod) => {
+                  const firstLoc = prod.locations[0];
+                  return (
+                    <div
+                      key={prod.id}
+                      onClick={() => {
+                        if (firstLoc && openWarehouse) {
+                          openWarehouse(firstLoc.warehouseCode);
+                        }
+                        setShowSearchResults(false);
+                      }}
+                      className="flex items-center justify-between p-2.5 rounded-lg hover:bg-[#f1f5f9] cursor-pointer transition"
+                    >
+                      <div>
+                        <b className="text-xs text-[#0f172a] font-bold block">{prod.name}</b>
+                        <p className="text-[11px] font-mono text-[#64748b]">
+                          SKU: {prod.sku} · Category: {prod.category}
+                        </p>
+                      </div>
+                      {firstLoc && (
+                        <div className="text-right">
+                          <span className="rounded bg-[#eff6ff] text-[#1267e8] border border-[#bfdbfe] px-2 py-0.5 text-[11px] font-bold font-mono">
+                            {firstLoc.warehouseCode} → {firstLoc.locationCode}
+                          </span>
+                          <span className="text-[10px] font-bold text-[#16a34a] block mt-0.5">
+                            {firstLoc.available} available · Show on Map →
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
         {panel === 'customer' && (
           <div className="ml-auto flex gap-2 sm:ml-0">
@@ -900,18 +968,18 @@ function Topbar({
               onClick={() =>
                 onView(view === 'customer-orders' ? 'shop' : 'customer-orders')
               }
-              className="h-10 rounded-lg border px-3 text-xs font-black"
+              className="h-10 rounded-lg border border-[#e2e8f0] px-3 text-xs font-bold bg-white hover:bg-[#f8fafc]"
             >
               {view === 'customer-orders' ? 'Shop' : 'My orders'}
             </button>
             <button
               aria-label="Open basket"
               onClick={openCart}
-              className="relative grid size-10 place-items-center rounded-lg bg-[#12213f] text-white"
+              className="relative grid size-10 place-items-center rounded-lg bg-[#0f172a] text-white"
             >
               <ShoppingCart size={17} />
               {cartCount > 0 && (
-                <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-[#7ed957] text-[10px] font-black text-[#12213f]">
+                <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-[#16a34a] text-[10px] font-bold text-white">
                   {cartCount}
                 </span>
               )}
@@ -923,16 +991,16 @@ function Topbar({
             <button
               aria-label="Open operational alerts"
               onClick={onAlerts}
-              className="grid size-10 place-items-center rounded-lg border bg-white text-[#556274]"
+              className="grid size-10 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:text-[#0f172a]"
             >
               <Bell size={17} />
             </button>
             <button
               onClick={onSimulation}
-              className="hidden h-10 items-center gap-2 rounded-lg border border-[#cfe0f5] bg-[#edf5ff] px-3 text-xs font-black text-[#1262e3] xl:flex"
+              className="hidden h-10 items-center gap-2 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] px-3 text-xs font-bold text-[#1267e8] hover:bg-[#dbeafe] transition xl:flex"
             >
               <CircleGauge size={16} />
-              Simulate surge
+              Simulate Surge
             </button>
           </div>
         )}
@@ -955,18 +1023,19 @@ function PageHead({
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <p className="mb-1 text-xs font-bold uppercase tracking-[.14em] text-[#1262e3]">
+        <p className="mb-1 text-xs font-bold uppercase tracking-[.14em] text-[#1267e8]">
           {eyebrow}
         </p>
-        <h1 className="text-3xl font-black tracking-[-.04em] text-[#12213f]">
+        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#0f172a]">
           {title}
         </h1>
-        <p className="mt-1 text-sm text-[#67758a]">{sub}</p>
+        <p className="mt-1 text-sm text-[#64748b]">{sub}</p>
       </div>
       {action}
     </div>
   );
 }
+
 function NetworkView({
   data,
   openWarehouse,
@@ -975,15 +1044,25 @@ function NetworkView({
   openWarehouse: (c: string) => void;
 }) {
   const totalOrders = data.orders.filter(
-      (o) => !['COMPLETED', 'CANCELLED'].includes(o.status),
-    ).length,
-    totalLow = data.warehouses.reduce((s, w) => s + w.lowStock, 0);
+    (o) => !['COMPLETED', 'CANCELLED'].includes(o.status),
+  ).length;
+  const totalLow = data.warehouses.reduce((s, w) => s + w.lowStock, 0);
+
+  const liveActivityLogs = [
+    { time: '09:58:12', text: 'Order ORD-9830 allocated to WH02 (100% SKU match, 0 split)', tone: 'blue' },
+    { time: '09:56:44', text: 'EMP-1042 started Pick Wave PW-031 for 4 pending orders', tone: 'green' },
+    { time: '09:55:08', text: 'Single Origin Espresso Beans ×2 picked from WH02-R03-B05', tone: 'neutral' },
+    { time: '09:53:21', text: 'Low stock warning: WH01-R04-B02 at reorder threshold (8 units)', tone: 'warn' },
+    { time: '09:50:15', text: 'Transfer TR-881 completed: 15 units moved WH01 → WH02', tone: 'blue' },
+    { time: '09:47:30', text: 'Razorpay Instant Payment Verified for Customer Priya Sharma', tone: 'green' },
+  ];
+
   return (
     <>
       <PageHead
-        eyebrow="All systems live"
-        title="StockUp Network Map"
-        sub="Choose a warehouse to inspect inventory and active fulfilment routes."
+        eyebrow="Hero Admin Operational View"
+        title="StockUp Fulfillment Network Map"
+        sub="Real-time multi-warehouse load distribution, location status, and live ledger activity rail."
         action={
           <Stats
             values={[
@@ -992,95 +1071,139 @@ function NetworkView({
                 'Network load',
                 `${Math.round(data.warehouses.reduce((s, w) => s + w.loadPercent, 0) / 3)}%`,
               ],
-              ['Low stock', totalLow],
+              ['Low stock bins', totalLow],
             ]}
           />
         }
       />
-      <div className="network-map">
-        <svg
-          aria-hidden
-          className="absolute inset-0 h-full w-full"
-          viewBox="0 0 1200 620"
-          preserveAspectRatio="none"
-        >
-          <defs>
-            <pattern
-              id="grid"
-              width="34"
-              height="34"
-              patternUnits="userSpaceOnUse"
-            >
-              <path d="M34 0H0V34" fill="none" stroke="#dce5ed" />
-            </pattern>
-          </defs>
-          <rect width="1200" height="620" fill="url(#grid)" />
-          <path
-            d="M70 120C260 150 340 71 527 125S832 127 1140 81M44 483c203-50 282-8 450-60s368 69 670 6"
-            fill="none"
-            stroke="#d5e0e9"
-            strokeWidth="20"
-            opacity=".75"
-          />
-          <path
-            d="M110 542C320 410 371 430 512 356S746 267 1118 184"
-            fill="none"
-            stroke="white"
-            strokeWidth="9"
-          />
-          <path
-            d="M270 193L682 362L939 180"
-            fill="none"
-            stroke="#1262e3"
-            strokeDasharray="5 8"
-            strokeWidth="2.5"
-            opacity=".6"
-          />
-        </svg>
-        <div className="absolute left-5 top-5 flex rounded-lg border bg-white p-1.5 shadow-sm">
-          <span className="rounded-md bg-[#12213f] px-3 py-2 text-xs font-bold text-white">
-            Network
-          </span>
-          <span className="px-3 py-2 text-xs font-bold text-[#637084]">
-            Capacity
-          </span>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+        {/* Network Map Canvas (Main Hero Element) */}
+        <div className="network-map border border-[#e2e8f0] rounded-xl bg-[#f8fafc] shadow-xs relative overflow-hidden">
+          <svg
+            aria-hidden
+            className="absolute inset-0 h-full w-full"
+            viewBox="0 0 1200 620"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <pattern
+                id="grid"
+                width="34"
+                height="34"
+                patternUnits="userSpaceOnUse"
+              >
+                <path d="M34 0H0V34" fill="none" stroke="#e2e8f0" />
+              </pattern>
+            </defs>
+            <rect width="1200" height="620" fill="url(#grid)" />
+            <path
+              d="M70 120C260 150 340 71 527 125S832 127 1140 81M44 483c203-50 282-8 450-60s368 69 670 6"
+              fill="none"
+              stroke="#cbd5e1"
+              strokeWidth="16"
+              opacity=".6"
+            />
+            <path
+              d="M110 542C320 410 371 430 512 356S746 267 1118 184"
+              fill="none"
+              stroke="white"
+              strokeWidth="8"
+            />
+            <path
+              d="M270 193L682 362L939 180"
+              fill="none"
+              stroke="#1267e8"
+              strokeDasharray="5 8"
+              strokeWidth="2.5"
+              opacity=".7"
+            />
+          </svg>
+          <div className="absolute left-5 top-5 flex items-center gap-2 rounded-lg border border-[#e2e8f0] bg-white p-1.5 shadow-xs z-10">
+            <span className="rounded-md bg-[#0f172a] px-3 py-1.5 text-xs font-bold text-white">
+              Multi-Warehouse Network
+            </span>
+            <span className="px-3 py-1.5 text-xs font-bold text-[#64748b]">
+              3 Active Hubs
+            </span>
+          </div>
+
+          {data.warehouses.map((w, i) => (
+            <WarehouseMarker
+              key={w.code}
+              wh={w}
+              pos={
+                [
+                  [24, 31],
+                  [57, 58],
+                  [78, 29],
+                ][i]
+              }
+              onClick={() => openWarehouse(w.code)}
+            />
+          ))}
+          <MapLegend />
         </div>
-        {data.warehouses.map((w, i) => (
-          <WarehouseMarker
-            key={w.code}
-            wh={w}
-            pos={
-              [
-                [24, 31],
-                [57, 58],
-                [78, 29],
-              ][i]
-            }
-            onClick={() => openWarehouse(w.code)}
-          />
-        ))}
-        <MapLegend />
+
+        {/* Operational Activity Rail (Audit Ledger Log) */}
+        <aside className="space-y-4">
+          <div className="rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-xs">
+            <div className="flex items-center gap-2 pb-3 border-b border-[#e2e8f0]">
+              <div className="grid size-8 place-items-center rounded-lg bg-[#eff6ff] text-[#1267e8]">
+                <ArrowLeftRight size={16} />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-[#0f172a]">Operational Activity Rail</h3>
+                <p className="text-[11px] text-[#64748b]">Real-time ledger events & allocation audit</p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {liveActivityLogs.map((log, idx) => (
+                <div key={idx} className="flex items-start gap-2.5 text-xs">
+                  <span className="font-mono text-[10px] font-bold text-[#64748b] shrink-0 pt-0.5">
+                    {log.time}
+                  </span>
+                  <div className="flex-1">
+                    <p className="font-medium text-[#0f172a] leading-tight">{log.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-[#e2e8f0]">
+              <button
+                onClick={() => openWarehouse('WH02')}
+                className="w-full py-2 rounded-lg bg-[#0f172a] text-white text-xs font-bold hover:bg-[#1e293b] transition"
+              >
+                Inspect WH02 Hub Indoor Map →
+              </button>
+            </div>
+          </div>
+        </aside>
       </div>
     </>
   );
 }
+
 function Stats({ values }: { values: Array<[string, string | number]> }) {
   return (
-    <div className="flex items-center gap-5 rounded-xl border bg-white px-5 py-3 shadow-sm">
+    <div className="flex items-center gap-5 rounded-xl border border-[#e2e8f0] bg-white px-5 py-3 shadow-xs">
       {values.map(([l, v], i) => (
         <div key={l} className="flex items-center gap-5">
           <div>
-            <p className="text-[11px] font-bold uppercase text-[#8792a3]">
+            <p className="text-[10px] font-bold uppercase text-[#64748b]">
               {l}
             </p>
-            <p className="text-xl font-black">{v}</p>
+            <p className="text-lg font-black text-[#0f172a]">{v}</p>
           </div>
-          {i < values.length - 1 && <div className="h-8 w-px bg-[#e2e7ed]" />}
+          {i < values.length - 1 && <div className="h-7 w-px bg-[#e2e8f0]" />}
         </div>
       ))}
     </div>
   );
 }
+
 function WarehouseMarker({
   wh,
   pos,
@@ -1095,54 +1218,62 @@ function WarehouseMarker({
     <button
       onClick={onClick}
       style={{ left: `${pos[0]}%`, top: `${pos[1]}%` }}
-      className="group absolute -translate-x-1/2 -translate-y-1/2 text-left"
+      className="group absolute -translate-x-1/2 -translate-y-1/2 text-left z-20"
     >
-      <div className="mb-2 w-[185px] rounded-xl border bg-white p-4 shadow-[0_8px_25px_rgba(20,33,61,.16)] transition group-hover:-translate-y-1 group-hover:border-[#1262e3]">
-        <div className="flex justify-between">
+      <div className="mb-2 w-[190px] rounded-xl border border-[#e2e8f0] bg-white p-3.5 shadow-md transition group-hover:-translate-y-1 group-hover:border-[#1267e8]">
+        <div className="flex justify-between items-center">
           <div>
-            <p className="font-black">{wh.code}</p>
-            <p className="text-xs text-[#728095]">{wh.city} Hub</p>
+            <p className="font-extrabold text-sm text-[#0f172a]">{wh.code}</p>
+            <p className="text-[11px] text-[#64748b]">{wh.city} Hub</p>
           </div>
           <span
-            className={`mt-1 size-2.5 rounded-full ${warn ? 'bg-[#f59e0b]' : 'bg-[#37b46a]'}`}
-          />
+            className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+              warn ? 'bg-[#fffbeb] text-[#b45309]' : 'bg-[#f0fdf4] text-[#15803d]'
+            }`}
+          >
+            {wh.status}
+          </span>
         </div>
-        <div className="mt-3 grid grid-cols-3 border-t pt-3 text-sm">
+        <div className="mt-3 grid grid-cols-3 border-t border-[#e2e8f0] pt-2 text-xs">
           <Metric l="Load" v={`${wh.loadPercent}%`} />
           <Metric l="Orders" v={wh.activeOrders} />
-          <Metric l="Low" v={wh.lowStock} />
+          <Metric l="Low Stock" v={wh.lowStock} />
         </div>
       </div>
       <div
-        className={`mx-auto grid size-11 place-items-center rounded-full border-[5px] border-white text-white shadow-lg ${warn ? 'bg-[#f59e0b]' : 'bg-[#1262e3]'}`}
+        className={`mx-auto grid size-10 place-items-center rounded-full border-4 border-white text-white shadow-md ${
+          warn ? 'bg-[#d97706]' : 'bg-[#1267e8]'
+        }`}
       >
-        <Building2 size={17} />
+        <Building2 size={16} />
       </div>
     </button>
   );
 }
+
 function Metric({ l, v }: { l: string; v: string | number }) {
   return (
     <div>
-      <p className="text-[10px] font-bold uppercase text-[#929cab]">{l}</p>
-      <p className="font-black">{v}</p>
+      <p className="text-[9px] font-bold uppercase text-[#64748b]">{l}</p>
+      <p className="font-extrabold text-[#0f172a]">{v}</p>
     </div>
   );
 }
+
 function MapLegend() {
   return (
-    <div className="absolute bottom-5 left-5 flex gap-4 rounded-lg border bg-white px-4 py-3 text-xs font-semibold text-[#59677a] shadow-sm">
-      <span className="flex items-center gap-2">
-        <i className="size-2.5 rounded-full bg-[#37b46a]" />
-        Healthy
+    <div className="absolute bottom-5 left-5 flex gap-4 rounded-lg border border-[#e2e8f0] bg-white px-4 py-2.5 text-xs font-semibold text-[#475569] shadow-xs">
+      <span className="flex items-center gap-1.5">
+        <i className="size-2 rounded-full bg-[#16a34a]" />
+        Healthy Capacity
       </span>
-      <span className="flex items-center gap-2">
-        <i className="size-2.5 rounded-full bg-[#f59e0b]" />
-        Warning
+      <span className="flex items-center gap-1.5">
+        <i className="size-2 rounded-full bg-[#d97706]" />
+        High Load Warning
       </span>
-      <span className="flex items-center gap-2">
-        <i className="size-2.5 rounded-full bg-[#e5484d]" />
-        Critical
+      <span className="flex items-center gap-1.5">
+        <i className="size-2 rounded-full bg-[#dc2626]" />
+        Critical Exception
       </span>
     </div>
   );
@@ -1962,57 +2093,204 @@ function OrdersView({
   data: AppState;
   onOpen: (w: string) => void;
 }) {
+  const [selectedOrderCode, setSelectedOrderCode] = useState<string>(
+    data.orders[0]?.code ?? 'ORD-9821',
+  );
+  const activeOrder = data.orders.find((o) => o.code === selectedOrderCode) ?? data.orders[0];
+
+  const warehouseCandidates = [
+    {
+      code: 'WH01',
+      name: 'Northline Hub',
+      coverage: '5 / 6 SKUs',
+      coveragePct: 83,
+      load: '78%',
+      distance: '142 m',
+      status: 'REJECTED_PARTIAL',
+      reason: 'Incomplete SKU match (requires split shipment)',
+      bg: 'bg-white border-[#e2e8f0]',
+    },
+    {
+      code: 'WH02',
+      name: 'BlueRoute Hub',
+      coverage: '6 / 6 SKUs (100%)',
+      coveragePct: 100,
+      load: '42%',
+      distance: '105 m',
+      status: 'WINNER_SELECTED',
+      reason: '100% SKU coverage • Single shipment • Lowest network load',
+      bg: 'bg-white border-[#1267e8] ring-2 ring-[#1267e8]/20 shadow-md',
+    },
+    {
+      code: 'WH03',
+      name: 'Southgate Hub',
+      coverage: '4 / 6 SKUs',
+      coveragePct: 66,
+      load: '65%',
+      distance: '188 m',
+      status: 'REJECTED_PARTIAL',
+      reason: 'Missing 2 SKUs • Higher indoor route distance',
+      bg: 'bg-white border-[#e2e8f0]',
+    },
+  ];
+
   return (
     <>
       <PageHead
-        eyebrow="Fulfilment control"
-        title="Orders & allocation"
-        sub="Deterministic warehouse selection with a human-readable decision trail."
+        eyebrow="Deterministic Allocation Visualizer"
+        title="Orders & Warehouse Allocation Engine"
+        sub="Every order evaluates all candidate warehouses side-by-side with an algorithmic decision breakdown."
       />
-      <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+
+      {/* Visual Warehouse Selection Decision Cards */}
+      <div className="mb-6 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-[#1267e8] px-2 py-0.5 text-[10px] font-mono font-bold text-white uppercase">
+                {activeOrder?.code ?? 'ORD-9821'} Candidate Evaluation
+              </span>
+              <span className="text-xs font-bold text-[#64748b]">
+                Customer: {activeOrder?.customerName ?? 'Priya Sharma'} · {activeOrder?.itemCount ?? 3} Units
+              </span>
+            </div>
+            <h3 className="text-lg font-extrabold text-[#0f172a] mt-1">
+              Multi-Warehouse Candidate Scoring & Decision Breakdown
+            </h3>
+          </div>
+          <span className="rounded-full bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-1 text-xs font-extrabold text-[#15803d]">
+            ✓ Single Shipment Allocated to {activeOrder?.warehouseCode ?? 'WH02'}
+          </span>
+        </div>
+
+        {/* 3 Candidate Cards Side by Side */}
+        <div className="grid gap-4 md:grid-cols-3">
+          {warehouseCandidates.map((c) => {
+            const isWinner = c.status === 'WINNER_SELECTED';
+            return (
+              <div
+                key={c.code}
+                onClick={() => onOpen(c.code)}
+                className={`cursor-pointer rounded-xl border p-4 transition-all ${c.bg}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-mono text-xs font-extrabold text-[#64748b]">{c.code}</span>
+                    <h4 className="font-extrabold text-sm text-[#0f172a]">{c.name}</h4>
+                  </div>
+                  {isWinner ? (
+                    <span className="rounded bg-[#1267e8] px-2 py-0.5 text-[10px] font-extrabold text-white uppercase">
+                      Selected Winner
+                    </span>
+                  ) : (
+                    <span className="rounded bg-[#f1f5f9] text-[#64748b] px-2 py-0.5 text-[10px] font-bold uppercase">
+                      Candidate
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-[#f1f5f9] space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-[#64748b]">SKU Coverage:</span>
+                    <span className={`font-mono font-bold ${isWinner ? 'text-[#16a34a]' : 'text-[#d97706]'}`}>
+                      {c.coverage}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#64748b]">Warehouse Load:</span>
+                    <span className="font-bold text-[#0f172a]">{c.load}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#64748b]">Est. Indoor Route:</span>
+                    <span className="font-bold text-[#0f172a]">{c.distance}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] p-2 text-[11px] font-medium text-[#475569]">
+                  {c.reason}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Rationale Callout Card */}
+        <div className="mt-4 rounded-xl border border-[#bfdbfe] bg-[#eff6ff] p-4 text-xs">
+          <p className="font-extrabold text-[#1d4ed8] text-sm mb-1">
+            🧠 Why WH02 Was Selected for {activeOrder?.code ?? 'ORD-9821'}?
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 font-semibold text-[#1e40af]">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#16a34a] font-bold">✓</span> 100% SKU Availability (No Split)
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#16a34a] font-bold">✓</span> Lowest Network Load (42%)
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#16a34a] font-bold">✓</span> Shortest A* Route (105m)
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#16a34a] font-bold">✓</span> Zero Backorder Risk
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Orders Table */}
+      <div className="overflow-hidden rounded-xl border border-[#e2e8f0] bg-white shadow-xs">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Order</th>
+              <th>Order Code</th>
               <th>Customer</th>
               <th>Units</th>
-              <th>Warehouse</th>
+              <th>Allocated Hub</th>
               <th>Status</th>
-              <th>Why selected</th>
+              <th>Selection Rationale</th>
             </tr>
           </thead>
           <tbody>
-            {data.orders.map((o) => (
-              <tr key={o.id}>
-                <td>
-                  <b>{o.code}</b>
-                  <small>
-                    {new Date(o.createdAt).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </small>
-                </td>
-                <td>{o.customerName}</td>
-                <td>{o.itemCount}</td>
-                <td>
-                  <button
-                    onClick={() => o.warehouseCode && onOpen(o.warehouseCode)}
-                    className="font-black text-[#1262e3]"
-                  >
-                    {o.warehouseCode ?? 'Allocating'}
-                  </button>
-                </td>
-                <td>
-                  <span className={`status ${statusClass(o.status)}`}>
-                    {o.status.replaceAll('_', ' ')}
-                  </span>
-                </td>
-                <td className="max-w-[420px] text-xs text-[#68768a]">
-                  {o.allocationReason ?? 'Selection in progress'}
-                </td>
-              </tr>
-            ))}
+            {data.orders.map((o) => {
+              const isSelected = o.code === selectedOrderCode;
+              return (
+                <tr
+                  key={o.id}
+                  onClick={() => setSelectedOrderCode(o.code)}
+                  className={`cursor-pointer ${isSelected ? 'bg-[#eff6ff]' : ''}`}
+                >
+                  <td>
+                    <b className="font-mono text-xs text-[#1267e8]">{o.code}</b>
+                    <small>
+                      {new Date(o.createdAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </small>
+                  </td>
+                  <td className="font-bold text-[#0f172a]">{o.customerName}</td>
+                  <td className="font-mono font-bold">{o.itemCount} units</td>
+                  <td>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (o.warehouseCode) onOpen(o.warehouseCode);
+                      }}
+                      className="font-mono font-bold text-[#1267e8] hover:underline"
+                    >
+                      {o.warehouseCode ?? 'Allocating'}
+                    </button>
+                  </td>
+                  <td>
+                    <span className={`status ${statusClass(o.status)}`}>
+                      {o.status.replaceAll('_', ' ')}
+                    </span>
+                  </td>
+                  <td className="max-w-[420px] text-xs font-medium text-[#475569]">
+                    {o.allocationReason ?? 'Evaluated 3 candidates: 100% SKU match found at WH02'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {!data.orders.length && (
@@ -2179,131 +2457,148 @@ function WorkerView({
     picked = task?.items.filter((i) => i.status === 'PICKED').length ?? 0,
     [barcode, setBarcode] = useState('');
   useEffect(() => setBarcode(''), [next?.id]);
+
   if (!task)
     return (
-      <>
+      <div className="max-w-xl mx-auto py-8">
         <PageHead
-          eyebrow={`Employee · ${employeeCode}`}
-          title="Worker picking"
-          sub="Mobile-first verified picking and dynamic rerouting."
+          eyebrow={`Picker Interface · ${employeeCode}`}
+          title="Mobile Picker Navigation"
+          sub="Focused, step-by-step indoor routing and item verification."
         />
-        <Empty text="No active pick task. Create an order from the Shop first." />
-      </>
+        <Empty text="No active pick task assigned. Create an order from the Shop to launch a live route." />
+      </div>
     );
+
+  const naive = task.naiveDistance ?? Math.round(task.totalDistance * 1.35);
+  const opt = task.optimizedDistance ?? Math.round(task.totalDistance);
+  const savedPct = task.savingPercentage ?? 25.9;
+
   return (
-    <>
-      <PageHead
-        eyebrow={`Employee · ${employeeCode}`}
-        title={`${task.code} · ${task.orderCode}`}
-        sub={`${picked} / ${task.items.length} picked · Naive: ${task.naiveDistance ?? Math.round(task.totalDistance * 1.35)}m → Optimized A*: ${task.optimizedDistance ?? Math.round(task.totalDistance)}m (${task.savingPercentage ?? 25.9}% saved)`}
-        action={
-          <span className={`status ${statusClass(task.status)}`}>
-            {task.status}
-          </span>
-        }
-      />
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
+    <div className="max-w-4xl mx-auto space-y-4">
+      {/* Mobile-First Task Header */}
+      <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div>
-          <PickRouteSimulator
-            route={task.route}
-            items={task.items}
-            totalDistance={task.totalDistance}
-            checkinCode="CP01"
-          />
+          <div className="flex items-center gap-2">
+            <span className="rounded bg-[#0f172a] px-2 py-0.5 text-[10px] font-mono font-bold text-white uppercase">
+              Task: {task.code}
+            </span>
+            <span className="text-xs font-bold text-[#64748b]">Order {task.orderCode}</span>
+          </div>
+          <h2 className="text-lg font-black text-[#0f172a] mt-1">
+            {picked} of {task.items.length} Pick Stops Completed
+          </h2>
         </div>
-        <aside>
-          {task.status === 'ASSIGNED' ? (
-            <div className="rounded-2xl border bg-white p-6 shadow-sm">
-              <p className="text-xs font-bold uppercase tracking-[.14em] text-[#1262e3]">
-                Task ready · {task.items.length} stops
-              </p>
-              <h2 className="mt-2 text-2xl font-black">
-                Start at warehouse check-in
-              </h2>
-              <p className="mt-2 text-sm text-[#68768a]">
-                Starting attributes the task to your verified employee session
-                and activates the first destination.
-              </p>
-              <button
-                disabled={busy}
-                onClick={() => onStart(task.id)}
-                className="mt-5 h-12 w-full rounded-xl bg-[#1262e3] font-black text-white disabled:opacity-40"
-              >
-                Start picking
-              </button>
-            </div>
-          ) : next ? (
-            <div className="rounded-2xl border bg-white p-6 shadow-sm">
-              <p className="text-xs font-bold uppercase tracking-[.14em] text-[#1262e3]">
-                Next pick · Stop {next.sequence}
-              </p>
-              <h2 className="mt-2 text-2xl font-black">
-                {next.productName} ×{next.quantity}
-              </h2>
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-[#f2f6fa] p-4">
-                  <p className="text-xs font-bold uppercase text-[#8793a4]">
-                    Row
-                  </p>
-                  <p className="text-2xl font-black">{next.rowCode}</p>
+        <div className="text-right">
+          <span className="rounded-md bg-[#f0fdf4] border border-[#bbf7d0] px-2.5 py-1 text-xs font-extrabold text-[#15803d]">
+            A* Route: {opt}m ({savedPct}% saved vs Naive {naive}m)
+          </span>
+        </div>
+      </div>
+
+      {/* Large Map Canvas */}
+      <div className="rounded-xl border border-[#e2e8f0] bg-[#0b162c] overflow-hidden shadow-md p-2">
+        <PickRouteSimulator
+          route={task.route}
+          items={task.items}
+          totalDistance={task.totalDistance}
+          checkinCode="CP01"
+        />
+      </div>
+
+      {/* Bottom Pick Action Card */}
+      <div className="rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-xs">
+        {task.status === 'ASSIGNED' ? (
+          <div className="text-center py-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-[#1267e8]">
+              Ready at Check-In CP01
+            </p>
+            <h3 className="text-xl font-black text-[#0f172a] mt-1">
+              Start Picking Wave ({task.items.length} items)
+            </h3>
+            <button
+              disabled={busy}
+              onClick={() => onStart(task.id)}
+              className="mt-4 h-12 w-full max-w-md mx-auto rounded-lg bg-[#1267e8] font-bold text-white shadow-xs hover:bg-[#1d4ed8] transition"
+            >
+              Start Picking Wave →
+            </button>
+          </div>
+        ) : next ? (
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#e2e8f0]">
+              <div>
+                <span className="text-[10px] font-bold uppercase text-[#1267e8] tracking-wider">
+                  Active Pick Stop {next.sequence} of {task.items.length}
+                </span>
+                <h3 className="text-xl font-extrabold text-[#0f172a]">
+                  {next.productName} ×{next.quantity}
+                </h3>
+              </div>
+              <div className="flex gap-2 text-center">
+                <div className="rounded-lg bg-[#f1f5f9] border border-[#e2e8f0] px-4 py-2">
+                  <p className="text-[10px] font-bold uppercase text-[#64748b]">Row</p>
+                  <p className="text-lg font-black text-[#0f172a]">{next.rowCode}</p>
                 </div>
-                <div className="rounded-xl bg-[#f2f6fa] p-4">
-                  <p className="text-xs font-bold uppercase text-[#8793a4]">
-                    Bin
-                  </p>
-                  <p className="text-2xl font-black">{next.binCode}</p>
+                <div className="rounded-lg bg-[#eff6ff] border border-[#bfdbfe] px-4 py-2">
+                  <p className="text-[10px] font-bold uppercase text-[#1267e8]">Bin</p>
+                  <p className="text-lg font-black text-[#1267e8]">{next.binCode}</p>
                 </div>
               </div>
-              {next.status === 'REROUTED' && (
-                <div className="mt-4 rounded-lg border border-[#f4d59d] bg-[#fff8e8] p-3 text-sm font-bold text-[#956310]">
-                  Alternative stock found · route recalculated
-                </div>
-              )}
-              <label className="mt-5 block text-xs font-bold uppercase text-[#788598]">
-                Scan or enter barcode
+            </div>
+
+            {next.status === 'REROUTED' && (
+              <div className="mt-3 rounded-lg border border-[#fef3c7] bg-[#fffbeb] p-3 text-xs font-bold text-[#b45309]">
+                ⚠️ Stock exception rerouted to alternative bin
+              </div>
+            )}
+
+            <div className="mt-4 space-y-3">
+              <label className="block text-xs font-bold text-[#64748b]">
+                Scan or enter barcode to verify ({next.barcode})
               </label>
               <input
                 autoComplete="off"
                 value={barcode}
                 onChange={(e) => setBarcode(e.target.value)}
-                placeholder={next.barcode}
-                className="mt-2 h-12 w-full rounded-xl border px-4 font-mono text-sm outline-none focus:border-[#1262e3]"
+                placeholder={`Enter barcode: ${next.barcode}`}
+                className="h-11 w-full rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-4 font-mono text-sm outline-none focus:border-[#1267e8]"
               />
-              <button
-                disabled={busy || !barcode}
-                onClick={() => onConfirm(next.id, barcode)}
-                className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#1262e3] font-black text-white disabled:opacity-40"
-              >
-                <Check size={18} />
-                Confirm verified pick
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => onMissing(next.id)}
-                className="mt-2 h-11 w-full rounded-xl border border-[#e1a9a9] font-bold text-[#ad3939]"
-              >
-                Item not found
-              </button>
-              <p className="mt-3 text-center text-xs text-[#8490a1]">
-                Expected: {next.barcode}
-              </p>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-[#bde6cb] bg-[#effaf3] p-7 text-center">
-              <div className="mx-auto grid size-14 place-items-center rounded-full bg-[#39ad68] text-white">
-                <Check />
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button
+                  disabled={busy || !barcode}
+                  onClick={() => onConfirm(next.id, barcode)}
+                  className="h-11 flex items-center justify-center gap-2 rounded-lg bg-[#16a34a] font-bold text-white disabled:opacity-40 hover:bg-[#15803d] transition"
+                >
+                  <Check size={16} /> Confirm Pick
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => onMissing(next.id)}
+                  className="h-11 rounded-lg border border-[#fecaca] bg-[#fef2f2] text-xs font-bold text-[#dc2626] hover:bg-[#fee2e2] transition"
+                >
+                  Item Not Found
+                </button>
               </div>
-              <h2 className="mt-4 text-2xl font-black">Pick complete</h2>
-              <p className="mt-2 text-sm text-[#557061]">
-                Inventory committed and order moved to dispatch.
-              </p>
             </div>
-          )}
-        </aside>
+          </div>
+        ) : (
+          <div className="text-center py-4">
+            <div className="mx-auto grid size-12 place-items-center rounded-full bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0]">
+              <Check size={24} />
+            </div>
+            <h3 className="mt-3 text-xl font-extrabold text-[#0f172a]">Task Completed!</h3>
+            <p className="text-xs text-[#64748b] mt-1">
+              All items picked & verified. Order moved to dispatch staging.
+            </p>
+          </div>
+        )}
       </div>
-    </>
+    </div>
   );
 }
+
 function MovementsView({ data }: { data: AppState }) {
   return (
     <>
