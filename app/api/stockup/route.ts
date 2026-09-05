@@ -1,5 +1,5 @@
-import { env } from 'cloudflare:workers';
 import { NextResponse } from 'next/server';
+import { getInMemoryD1 } from '@/lib/db/inMemoryD1';
 import { selectWarehouse } from '@/lib/algorithms/allocation';
 import {
   warehouseAStarRoute,
@@ -1255,9 +1255,17 @@ async function handleCreatePickWave(db: D1, body: any, staff: StaffIdentity) {
   return waveResult;
 }
 
+async function getDatabase(): Promise<D1> {
+  try {
+    const workerEnv = await import('cloudflare:workers' as any);
+    if (workerEnv?.env?.DB) return workerEnv.env.DB as D1;
+  } catch {}
+  return getInMemoryD1() as D1;
+}
+
 export async function GET() {
   try {
-    const db = env.DB as D1;
+    const db = await getDatabase();
     await ensureAccessSchema(db);
     await seed(db);
     return NextResponse.json(await state(db));
@@ -1270,7 +1278,7 @@ export async function GET() {
 }
 export async function POST(req: Request) {
   try {
-    const db = env.DB as D1;
+    const db = await getDatabase();
     await ensureAccessSchema(db);
     await seed(db);
     const body: any = await req.json();
