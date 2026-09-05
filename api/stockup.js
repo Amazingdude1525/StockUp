@@ -16,12 +16,13 @@ var MemoryStatement = class _MemoryStatement {
     return res.results[0] ?? null;
   }
   extractMainTable(sql) {
-    const sqlTrimmed = sql.trim();
-    const matches = [...sqlTrimmed.matchAll(/\bfrom\s+([a-z0-9_]+)\b(?!\s*\))/gi)];
-    if (matches.length > 0) {
-      return matches[matches.length - 1][1].toLowerCase();
+    let topSql = sql;
+    while (/\([^()]*\)/.test(topSql)) {
+      topSql = topSql.replace(/\([^()]*\)/g, " ");
     }
-    const anyFrom = sqlTrimmed.match(/\bfrom\s+([a-z0-9_]+)/i);
+    const match = topSql.match(/\bfrom\s+([a-z0-9_]+)/i);
+    if (match) return match[1].toLowerCase();
+    const anyFrom = sql.match(/\bfrom\s+([a-z0-9_]+)/i);
     return anyFrom ? anyFrom[1].toLowerCase() : "";
   }
   async all() {
@@ -116,13 +117,19 @@ var MemoryStatement = class _MemoryStatement {
       const products = this.dbStore.get("products") || [];
       const invLocs = this.dbStore.get("inventory_locations") || [];
       const bins = this.dbStore.get("bins") || [];
+      const pickTasks = this.dbStore.get("pick_tasks") || [];
       rows = rows.map((pti) => {
+        const pt = pickTasks.find((t) => t.id === pti.pick_task_id);
         const oi = orderItems.find((item) => item.id === pti.order_item_id);
         const p = products.find((prod) => prod.id === (oi?.product_id || pti.product_id));
         const il = invLocs.find((loc) => loc.id === pti.inventory_location_id);
         const b = bins.find((bin) => bin.id === il?.bin_id);
         return {
           ...pti,
+          pick_task_id: pti.pick_task_id,
+          order_id: pt?.order_id || "",
+          warehouse_id: pt?.warehouse_id || "",
+          task_status: pt?.status || "",
           product_id: p?.id || oi?.product_id || "",
           product_name: p?.name || "",
           sku: p?.sku || "",
@@ -167,7 +174,7 @@ var MemoryStatement = class _MemoryStatement {
           row[col] = this.params[idx] !== void 0 ? this.params[idx] : null;
         });
         const existingIdx = table.findIndex(
-          (r) => r.id && row.id && r.id === row.id || r.code && row.code && r.code === row.code
+          (r) => (r.id && row.id ? r.id === row.id : Boolean(r.code && row.code && r.code === row.code))
         );
         if (existingIdx >= 0) {
           if (!sqlLower.includes("ignore")) {
@@ -198,8 +205,15 @@ var MemoryStatement = class _MemoryStatement {
               targetRow.quantity_reserved = (targetRow.quantity_reserved || 0) + qty;
             }
             if (sqlLower.includes("status=")) {
-              const statusVal = String(this.params[0] || "COMPLETED");
-              targetRow.status = statusVal;
+              const statusMatch = sqlTrim.match(/status=['"]([^'"]+)['"]/i);
+              if (statusMatch) {
+                targetRow.status = statusMatch[1];
+              } else if (this.params.length > 0) {
+                targetRow.status = String(this.params[0] || "COMPLETED");
+              }
+            }
+            if (sqlLower.includes("employee_code=?") && this.params.length > 0) {
+              targetRow.employee_code = this.params[0];
             }
           }
         }
@@ -1370,12 +1384,9 @@ async function adjustInventory(db, body, staff) {
   return { referenceId, inventoryId: row.id, onHand: nextOnHand, delta };
 }
 async function startTask(db, body, staff) {
-  const task = await db.prepare("SELECT id,order_id,status FROM pick_tasks WHERE id=?").bind(body.taskId).first();
+  const task = await db.prepare("SELECT id,order_id,warehouse_id,status FROM pick_tasks WHERE id=?").bind(body.taskId).first();
   if (!task) throw new Error("Pick task not found.");
-  const taskWarehouse = await db.prepare(
-    "SELECT code FROM warehouses WHERE id=(SELECT warehouse_id FROM pick_tasks WHERE id=?)"
-  ).bind(task.id).first();
-  if (staff.warehouseCode && staff.warehouseCode !== taskWarehouse?.code)
+  if (staff.warehouseCode && staff.warehouseCode !== task.warehouse_id)
     throw new Error("This task belongs to another warehouse.");
   if (task.status !== "ASSIGNED")
     throw new Error("Only assigned tasks can be started.");

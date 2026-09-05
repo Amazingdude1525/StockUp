@@ -21,12 +21,13 @@ class MemoryStatement {
   }
 
   private extractMainTable(sql: string): string {
-    const sqlTrimmed = sql.trim();
-    const matches = [...sqlTrimmed.matchAll(/\bfrom\s+([a-z0-9_]+)\b(?!\s*\))/gi)];
-    if (matches.length > 0) {
-      return matches[matches.length - 1][1].toLowerCase();
+    let topSql = sql;
+    while (/\([^()]*\)/.test(topSql)) {
+      topSql = topSql.replace(/\([^()]*\)/g, ' ');
     }
-    const anyFrom = sqlTrimmed.match(/\bfrom\s+([a-z0-9_]+)/i);
+    const match = topSql.match(/\bfrom\s+([a-z0-9_]+)/i);
+    if (match) return match[1].toLowerCase();
+    const anyFrom = sql.match(/\bfrom\s+([a-z0-9_]+)/i);
     return anyFrom ? anyFrom[1].toLowerCase() : '';
   }
 
@@ -133,13 +134,19 @@ class MemoryStatement {
       const products = this.dbStore.get('products') || [];
       const invLocs = this.dbStore.get('inventory_locations') || [];
       const bins = this.dbStore.get('bins') || [];
+      const pickTasks = this.dbStore.get('pick_tasks') || [];
       rows = rows.map((pti) => {
+        const pt = pickTasks.find((t) => t.id === pti.pick_task_id);
         const oi = orderItems.find((item) => item.id === pti.order_item_id);
         const p = products.find((prod) => prod.id === (oi?.product_id || pti.product_id));
         const il = invLocs.find((loc) => loc.id === pti.inventory_location_id);
         const b = bins.find((bin) => bin.id === il?.bin_id);
         return {
           ...pti,
+          pick_task_id: pti.pick_task_id,
+          order_id: pt?.order_id || '',
+          warehouse_id: pt?.warehouse_id || '',
+          task_status: pt?.status || '',
           product_id: p?.id || oi?.product_id || '',
           product_name: p?.name || '',
           sku: p?.sku || '',
@@ -190,7 +197,7 @@ class MemoryStatement {
         });
 
         const existingIdx = table.findIndex(
-          (r) => (r.id && row.id && r.id === row.id) || (r.code && row.code && r.code === row.code),
+          (r) => (r.id && row.id ? r.id === row.id : Boolean(r.code && row.code && r.code === row.code)),
         );
         if (existingIdx >= 0) {
           if (!sqlLower.includes('ignore')) {
@@ -222,8 +229,15 @@ class MemoryStatement {
               targetRow.quantity_reserved = (targetRow.quantity_reserved || 0) + qty;
             }
             if (sqlLower.includes('status=')) {
-              const statusVal = String(this.params[0] || 'COMPLETED');
-              targetRow.status = statusVal;
+              const statusMatch = sqlTrim.match(/status=['"]([^'"]+)['"]/i);
+              if (statusMatch) {
+                targetRow.status = statusMatch[1];
+              } else if (this.params.length > 0) {
+                targetRow.status = String(this.params[0] || 'COMPLETED');
+              }
+            }
+            if (sqlLower.includes('employee_code=?') && this.params.length > 0) {
+              targetRow.employee_code = this.params[0];
             }
           }
         }

@@ -157,7 +157,7 @@ async function staffLogin(db: D1, body: any) {
     pinHash !== staff.pin_hash
   )
     throw new Error('Invalid warehouse or employee credentials.');
-  const token = crypto.randomUUID() + crypto.randomUUID();
+  const token = getUUID() + getUUID();
   const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
   await db
     .prepare(
@@ -182,12 +182,14 @@ async function requireStaff(
 ): Promise<StaffIdentity> {
   const token = String(body.sessionToken || '');
   if (!token) throw new Error('Staff sign-in required.');
-  const row = await db
-    .prepare(
-      'SELECT a.* FROM staff_sessions s JOIN staff_access a ON a.code=s.staff_code WHERE s.token_hash=? AND s.expires_at>?',
-    )
-    .bind(await hashToken(token), now())
-    .first<any>();
+  const tokenHash = await hashToken(token);
+  const sessions = (await db.prepare('SELECT * FROM staff_sessions').all()).results as any[];
+  const session = sessions.find(
+    (s: any) => s.token_hash === tokenHash && s.expires_at > now(),
+  );
+  if (!session) throw new Error('Staff sign-in required.');
+  const staffList = (await db.prepare('SELECT * FROM staff_access').all()).results as any[];
+  const row = staffList.find((a: any) => a.code === session.staff_code);
   if (!row || !roles.includes(row.role))
     throw new Error(
       'This staff account is not permitted to perform that action.',
@@ -600,24 +602,35 @@ async function createOrder(db: D1, body: any) {
     : [];
   if (!cart.length) throw new Error('Cart is empty.');
   const whs = (
-    await db.prepare('SELECT id,code,load_percent FROM warehouses').all()
+    await db.prepare('SELECT * FROM warehouses').all()
+  ).results as any[];
+  const allInvLocs = (
+    await db.prepare('SELECT * FROM inventory_locations').all()
+  ).results as any[];
+  const allBins = (
+    await db.prepare('SELECT * FROM bins').all()
   ).results as any[];
   const candidates = [] as any[];
   for (const w of whs) {
     const entries = [];
     for (const item of cart) {
-      const row = await db
-        .prepare(
-          'SELECT COALESCE(SUM(quantity_on_hand-quantity_reserved),0) available,COUNT(*) bins,COALESCE(AVG(b.x+b.y),0) distance FROM inventory_locations il JOIN bins b ON b.id=il.bin_id WHERE il.warehouse_id=? AND il.product_id=?',
-        )
-        .bind(w.id, item.productId)
-        .first<any>();
+      const matchingLocs = allInvLocs.filter(
+        (il: any) => il.warehouse_id === w.id && il.product_id === item.productId,
+      );
+      const available = matchingLocs.reduce(
+        (s: number, il: any) => s + Math.max(0, (il.quantity_on_hand || 0) - (il.quantity_reserved || 0)),
+        0,
+      );
+      const avgDistance = matchingLocs.reduce((s: number, il: any) => {
+        const b = allBins.find((bin: any) => bin.id === il.bin_id);
+        return s + ((b?.x || 0) + (b?.y || 0));
+      }, 0) / Math.max(1, matchingLocs.length);
       entries.push({
         productId: item.productId,
         requested: item.quantity,
-        available: Number(row?.available ?? 0),
-        bins: Number(row?.bins ?? 0),
-        approxDistance: Number(row?.distance ?? 0),
+        available,
+        bins: matchingLocs.length,
+        approxDistance: avgDistance,
       });
     }
     candidates.push({
@@ -641,7 +654,7 @@ async function createOrder(db: D1, body: any) {
     splitExplanation = splitResult.reason;
   }
   const productRows = (
-    await db.prepare('SELECT id,price_paise FROM products').all()
+    await db.prepare('SELECT * FROM products').all()
   ).results as any[];
   const orderId = id('ORD'),
     count =
@@ -653,14 +666,22 @@ async function createOrder(db: D1, body: any) {
     created = now();
   const allocations = [] as any[];
   for (const item of cart) {
-    const loc = await db
-      .prepare(
-        'SELECT il.*,b.x,b.y FROM inventory_locations il JOIN bins b ON b.id=il.bin_id WHERE il.warehouse_id=? AND il.product_id=? AND il.quantity_on_hand-il.quantity_reserved>=? ORDER BY (il.quantity_on_hand-il.quantity_reserved) DESC LIMIT 1',
-      )
-      .bind(chosen.id, item.productId, item.quantity)
-      .first<any>();
-    if (!loc)
+    const warehouseInvLocs = allInvLocs.filter(
+      (il: any) =>
+        il.warehouse_id === chosen.id &&
+        il.product_id === item.productId &&
+        (il.quantity_on_hand || 0) - (il.quantity_reserved || 0) >= item.quantity,
+    );
+    warehouseInvLocs.sort(
+      (a: any, b: any) =>
+        ((b.quantity_on_hand || 0) - (b.quantity_reserved || 0)) -
+        ((a.quantity_on_hand || 0) - (a.quantity_reserved || 0)),
+    );
+    const bestLoc = warehouseInvLocs[0];
+    if (!bestLoc)
       throw new Error('Inventory changed during allocation. Please retry.');
+    const bin = allBins.find((b: any) => b.id === bestLoc.bin_id);
+    const loc = { ...bestLoc, x: bin?.x ?? 0, y: bin?.y ?? 0 };
     allocations.push({ item, loc, orderItemId: id('OI') });
   }
   const points: Point[] = allocations.map((a: any) => ({
@@ -758,14 +779,17 @@ async function createOrder(db: D1, body: any) {
 }
 
 async function refreshTaskRoute(db: D1, taskId: string) {
-  const pending = (
-    await db
-      .prepare(
-        "SELECT b.x,b.y FROM pick_task_items pti JOIN inventory_locations il ON il.id=pti.inventory_location_id JOIN bins b ON b.id=il.bin_id WHERE pti.pick_task_id=? AND pti.status!='PICKED' ORDER BY pti.sequence",
-      )
-      .bind(taskId)
-      .all()
-  ).results as Array<{ x: number; y: number }>;
+  const allItems = (await db.prepare('SELECT * FROM pick_task_items').all()).results as any[];
+  const allInvLocs = (await db.prepare('SELECT * FROM inventory_locations').all()).results as any[];
+  const allBins = (await db.prepare('SELECT * FROM bins').all()).results as any[];
+  const pendingItems = allItems.filter(
+    (pti: any) => pti.pick_task_id === taskId && pti.status !== 'PICKED',
+  );
+  const pending = pendingItems.map((pti: any) => {
+    const il = allInvLocs.find((loc: any) => loc.id === pti.inventory_location_id);
+    const b = allBins.find((bin: any) => bin.id === il?.bin_id);
+    return { x: b?.x ?? 0, y: b?.y ?? 0 };
+  });
   const route = warehouseAStarRoute(
     pending.map((point, index) => ({
       id: 'pending-' + index,
@@ -1065,17 +1089,11 @@ async function adjustInventory(db: D1, body: any, staff: StaffIdentity) {
 
 async function startTask(db: D1, body: any, staff: StaffIdentity) {
   const task = await db
-    .prepare('SELECT id,order_id,status FROM pick_tasks WHERE id=?')
+    .prepare('SELECT id,order_id,warehouse_id,status FROM pick_tasks WHERE id=?')
     .bind(body.taskId)
     .first<any>();
   if (!task) throw new Error('Pick task not found.');
-  const taskWarehouse = await db
-    .prepare(
-      'SELECT code FROM warehouses WHERE id=(SELECT warehouse_id FROM pick_tasks WHERE id=?)',
-    )
-    .bind(task.id)
-    .first<{ code: string }>();
-  if (staff.warehouseCode && staff.warehouseCode !== taskWarehouse?.code)
+  if (staff.warehouseCode && staff.warehouseCode !== task.warehouse_id)
     throw new Error('This task belongs to another warehouse.');
   if (task.status !== 'ASSIGNED')
     throw new Error('Only assigned tasks can be started.');
